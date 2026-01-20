@@ -1,0 +1,77 @@
+{
+    "$schema": "https://schema",
+    "type": "object",
+    "properties": { 
+        "workplace": {
+            "type": "object",
+            "description": "The worplace id code",
+            "minimum": 1,
+            "multipleOf": 1,
+            "properties": {
+                "id": { 
+                    "type": "number",
+                    "minimum": 1,
+                    "multipleOf": 1,
+                    "description": "The workplace id"
+                },
+                "description_it": {
+                    "type": "string",
+                    "description": "The workplace description in Italian"
+                },
+                "description_en": {
+                    "type": "string",
+                    "description": "The workplace description in english"
+                }
+            }, 
+            "required": [ "id", "description_it", "description_en" ] 
+        }, 
+        "event_id": { 
+            "type": "object",
+            "description": "The event identification code", 
+            "minimum": 1, 
+            "multipleOf": 1, 
+            "enum": [ 1, 2 ], 
+            "properties": { 
+                "id": { 
+                    "type": "number", 
+                    "minimum": 1, 
+                    "multipleOf": 1, 
+                    "enum": [ 1, 2, 3, 4, 5 ], 
+                    "description": "The event id " 
+                }, 
+                "description_it": { 
+                    "type": "string", 
+                    "description": "The event name in Italian" 
+                }, 
+                "description_en": { 
+                    "type": "string", 
+                    "description": "The event name in english" 
+                } 
+            }, 
+            "required": [ "id", "description_it", "description_en" ] 
+        }, 
+        "mes_data": { 
+            "type": "string", 
+            "description": "The payload of the mes QR code or Datamatrix" 
+        }, 
+        "good_items": { 
+            "type": "number", 
+            "description": "The quantity of good items for the current event", 
+            "minimum": 0, 
+            "multipleOf": 1 
+        }, 
+        "bad_items": { 
+            "type": "number", 
+            "description": "The quantity of bad items of the event", 
+            "minimum": 0, 
+            "multipleOf": 1 
+        }, 
+        "timestamp": { 
+            "type": "number", 
+            "description": "The date and time in unix timestamp format (seconds precision)", 
+            "multipleOf": 1, 
+            "minimum": 0 
+        }
+    },
+    "required": [ "workplace", "event_id", "mes_data", "good_items", "bad_items", "timestamp" ] 
+} 
