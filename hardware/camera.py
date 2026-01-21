@@ -3,7 +3,8 @@ import numpy as np
 import open3d as o3d
 import cv2
 import time
-from pyzbar.pyzbar import decode
+#from pyzbar.pyzbar import decode
+from pylibdmtx.pylibdmtx import decode
 import threading
 
 # ROI
@@ -11,14 +12,15 @@ ROI = (230, 150, 440, 370)  # x0, y0, x1, y1
 ROI_QR = (230, 150, 540, 370)  # x0, y0, x1, y1 #TODO: set ROI for QR code
 
 # RANSAC
-PLANE_THRESHOLD = 0.05  # 5 mm
+PLANE_THRESHOLD = 0.005  
 
-SHAPE_THRESHOLD = 1.2
+SHAPE_THRESHOLD = 1.5
 
 MIN_HEIGHT_THRESHOLD = 0.05
 MAX_HEIGHT_THRESHOLD = 0.30
-MIN_AREA_PIXELS = 500
+MIN_AREA_PIXELS = 5000
 MAX_OCCUPATION = 100
+THRESH_STD = 0.1
 
 
 class ObjCamera:
@@ -80,8 +82,8 @@ class ObjCamera:
 
         plane, inliers = pcd.segment_plane(
             distance_threshold=PLANE_THRESH,
-            ransac_n=1000,
-            num_iterations=1000
+            ransac_n=5000,
+            num_iterations=100
         )
         return plane
 
@@ -90,8 +92,10 @@ class ObjCamera:
         verts = np.asanyarray(points.get_vertices()).view(np.float32)
         return verts.reshape(-1, 3)
 
-    def __point_plane_distance(self, points):
-        a, b, c, d = self.plane
+    def __point_plane_distance(self, points, plane = None):
+        if plane is None:
+            plane = self.plane
+        a, b, c, d = plane
         num = a*points[:,0] + b*points[:,1] + c*points[:,2] + d
         den = np.sqrt(a*a + b*b + c*c)
         return num / den
@@ -138,6 +142,13 @@ class ObjCamera:
         valid = np.isfinite(roi_points[:,2])
         roi_points = roi_points[valid]
 
+        #Table re-calibration
+        new_plane = estimate_plane(roi_points)
+        new_distances = -self.__point_plane_distance(roi_points, new_plane)
+        std_height = np.std(new_distances)
+        if std_height < THRESH_STD:
+            self.plane = new_plane
+
         distances = -self.__point_plane_distance(roi_points)
 
         height_map = np.zeros((self.h, self.w), dtype=np.float32)
@@ -162,9 +173,6 @@ class ObjCamera:
             if self.obj_find:
                 self.obj_find = False   
             self.detect_queue = []
-            #TODO: sistemare la ricalibrazione
-            if np.sum(object_mask) < MAX_OCCUPATION:
-                table_calibration(depth_frame)
 
 
         return self.obj_find
@@ -230,6 +238,19 @@ class QrCamera:
 
     def __del__(self):
         self.pipeline.stop()
+    
+    def __point_plane_distance(self, points, plane = None):
+        if plane is None:
+            plane = self.plane
+        a, b, c, d = plane
+        num = a*points[:,0] + b*points[:,1] + c*points[:,2] + d
+        den = np.sqrt(a*a + b*b + c*c)
+        return num / den
+
+    def __depth_to_points(self, depth_frame):
+        points = self.pc.calculate(depth_frame)
+        verts = np.asanyarray(points.get_vertices()).view(np.float32)
+        return verts.reshape(-1, 3)
 
     def table_calibration(self, depth_frame:None):
             if depth_frame is None:
@@ -275,6 +296,14 @@ class QrCamera:
         valid = np.isfinite(roi_points[:,2])
         roi_points = roi_points[valid]
 
+        #Table re-calibration
+        new_plane = estimate_plane(roi_points)
+        new_distances = -point_plane_distance(roi_points, new_plane)
+        std_height = np.std(new_distances)
+        if std_height < THRESH_STD:
+            self.plane = new_plane
+
+
         distances = -self.__point_plane_distance(roi_points)
 
         height_map = np.zeros((self.h, self.w), dtype=np.float32)
@@ -302,18 +331,17 @@ class QrCamera:
         if not color_frame:
             return None, occlusion
 
-        color_image = np.asanyarray(color_frame.get_data())
-
-        gray = cv2.cvtColor(color_image, cv2.COLOR_BGR2GRAY)
-        gray = cv2.GaussianBlur(gray, (5, 5), 0)
-        gray = cv2.equalizeHist(gray)
-
-        data, _, _ = qr.detectAndDecode(gray)
+        img = np.asanyarray(color_frame.get_data())
         x0, y0, x1, y1 = ROI_QR
-        gray = gray[y0:y1, x0,x1]
+        img = img[y0:y1, x0,x1]
 
-        codes = decode(gray)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        gray = cv2.GaussianBlur(gray, (3, 3), 0)
+        #gray = cv2.equalizeHist(gray)
+        bw = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 31, 5)
+
+        codes = decode(bw, timeout=150, max_count=2)
 
         if codes and len(codes)==1:
-            return codes[0].data.decode("utf-8"), occlusion
+            return codes[0].data.decode("utf-8",  errors="replace"), occlusion
         return None, occlusion
