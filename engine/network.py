@@ -7,7 +7,7 @@ import time
 import paho.mqtt.client as mqtt
 from flask import Flask, request, jsonify
 
-from ..engine.event import Event
+from engine.event import Event
 
 SERVER_URL = "0.0.0.0"
 SERVER_PORT = 9000

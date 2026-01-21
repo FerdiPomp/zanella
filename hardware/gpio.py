@@ -39,5 +39,5 @@ class Light:
     def on(self):
         GPIO.output(LED_PIN, GPIO.HIGH)
 
-    def off(self)
+    def off(self):
         GPIO.output(LED_PIN, GPIO.LOW)

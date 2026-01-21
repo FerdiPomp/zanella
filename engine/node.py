@@ -3,7 +3,7 @@ from queue import Queue
 import time
 
 from engine.event import Event, EventXLayer, EVENTS, WORKSPACES, ITEMS
-from ..harware.camera import SharedQRState
+from hardware.camera import SharedQRState
 from engine.handler import ObjectDetectionHandler, ButtonPressHandler, QrHandler
 from engine.network import USBSender, USBReceiver, MQTTSender
 
@@ -80,7 +80,7 @@ class EnvNode(BaseNode):
             qr = None
             prev_qr, prev_time = self.shared_qr_state.get_prev()
             for i in range(len(prev_time)):
-                if event.timestamp > prev_time[-i-1]
+                if event.timestamp > prev_time[-i-1]:
                     qr = prev_qr[-i-1]
                     break
 
