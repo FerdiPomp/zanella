@@ -8,8 +8,8 @@ from pylibdmtx.pylibdmtx import decode
 import threading
 
 # ROI
-ROI = (230, 150, 440, 370)  # x0, y0, x1, y1
-ROI_QR = (230, 150, 540, 370)  # x0, y0, x1, y1 #TODO: set ROI for QR code
+ROI = (150, 90, 440, 400)  # x0, y0, x1, y1
+ROI_QR = (300, 300, 600, 600)  # x0, y0, x1, y1 #TODO: set ROI for QR code
 
 # RANSAC
 PLANE_THRESHOLD = 0.005  
@@ -21,6 +21,7 @@ MAX_HEIGHT_THRESHOLD = 0.30
 MIN_AREA_PIXELS = 5000
 MAX_OCCUPATION = 100
 THRESH_STD = 0.1
+MAX_LEN = 2
 
 
 class ObjCamera:
@@ -29,7 +30,7 @@ class ObjCamera:
         config = rs.config()
 
         if file_bag is not None:
-            config.enable_device_from_file(file_bag)
+            config.enable_device_from_file(file_bag,  repeat_playback=False)
         else:
             config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
 
@@ -52,7 +53,7 @@ class ObjCamera:
     def __del__(self):
         self.pipeline.stop()
 
-    def table_calibration(self, depth_frame:None):
+    def table_calibration(self, depth_frame=None):
         if depth_frame is None:
             frames = self.pipeline.wait_for_frames()
             depth_frame = frames.get_depth_frame()
@@ -68,7 +69,7 @@ class ObjCamera:
         self.roi_mask[y0:y1, x0:x1] = True
 
         points = self.__depth_to_points(depth_frame)
-        points = points.reshape(h, w, 3)
+        points = points.reshape(self.h, self.w, 3)
 
         roi_points = points[self.roi_mask]
         roi_points = roi_points[np.isfinite(roi_points[:,2])]
@@ -81,7 +82,7 @@ class ObjCamera:
         pcd.points = o3d.utility.Vector3dVector(points)
 
         plane, inliers = pcd.segment_plane(
-            distance_threshold=PLANE_THRESH,
+            distance_threshold=PLANE_THRESHOLD,
             ransac_n=5000,
             num_iterations=100
         )
@@ -100,14 +101,14 @@ class ObjCamera:
         den = np.sqrt(a*a + b*b + c*c)
         return num / den
 
-    def __overlap(mask1, mask2):
+    def __overlap(slef, mask1, mask2):
         inter = np.logical_and(mask1, mask2)
         return np.sum(inter) / max(np.sum(mask1), 1)
 
     def __there_is_obj(self):
         obj_list = self.detect_queue
         for i in range(len(obj_list)-1):
-            if not (overlap(obj_list[i],obj_list[i+1])>0.90):
+            if not (self.__overlap(obj_list[i], obj_list[i+1]) >0.90):
                 return False
         return True
 
@@ -125,8 +126,9 @@ class ObjCamera:
             hu = (np.sign(hu) * np.log10(np.abs(hu) + 1e-12)).flatten()
             distances = np.linalg.norm(self.expected_hu_set - hu, axis=1)
             min_distance = np.min(distances)
-            shape_ok_raw = min_distance < SHAPE_THRESHOLD
-            return shape_ok_raw
+            if min_distance < SHAPE_THRESHOLD:
+                return True
+        return False
 
     def find_object(self):
         frames = self.pipeline.wait_for_frames()
@@ -143,7 +145,7 @@ class ObjCamera:
         roi_points = roi_points[valid]
 
         #Table re-calibration
-        new_plane = estimate_plane(roi_points)
+        new_plane = self.__estimate_plane(roi_points)
         new_distances = -self.__point_plane_distance(roi_points, new_plane)
         std_height = np.std(new_distances)
         if std_height < THRESH_STD:
@@ -163,12 +165,12 @@ class ObjCamera:
         object_detected = np.sum(object_mask) > MIN_AREA_PIXELS
         shape_ok = self.__shape_validation(object_mask)
         
-        if object_detected and shape_ok:
+        if object_detected:
             self.detect_queue.append(object_mask)
-            if len(detect_queue)>MAX_LEN:
+            if len(self.detect_queue)>MAX_LEN:
                 self.detect_queue.pop(0)
                 if not self.obj_find:
-                    self.obj_find = there_is_obj()
+                    self.obj_find = self.__there_is_obj() & shape_ok
         else:
             if self.obj_find:
                 self.obj_find = False   
@@ -182,7 +184,7 @@ class SharedQRState:
     def __init__(self):
         self._lock = threading.Lock()
         self._qr = None
-        self._timestamp = None
+        self._timestamp = time.time()
         self._prev_qr = []
         self._prev_timestamp = []
         self._timeout = 100
@@ -219,7 +221,7 @@ class QrCamera:
         config = rs.config()
 
         if file_bag is not None:
-            config.enable_device_from_file(file_bag)
+            config.enable_device_from_file(file_bag, repeat_playback=False)
         else:
             config.enable_stream(rs.stream.color, 1920, 1080, rs.format.bgr8, 30)
             config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
@@ -252,7 +254,19 @@ class QrCamera:
         verts = np.asanyarray(points.get_vertices()).view(np.float32)
         return verts.reshape(-1, 3)
 
-    def table_calibration(self, depth_frame:None):
+    def __estimate_plane(self, points):
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(points)
+
+        plane, inliers = pcd.segment_plane(
+            distance_threshold=PLANE_THRESHOLD,
+            ransac_n=5000,
+            num_iterations=100
+        )
+        return plane
+
+
+    def table_calibration(self, depth_frame = None):
             if depth_frame is None:
                 frames = self.pipeline.wait_for_frames()
                 depth_frame = frames.get_depth_frame()
@@ -268,7 +282,7 @@ class QrCamera:
             self.roi_mask[y0:y1, x0:x1] = True
 
             points = self.__depth_to_points(depth_frame)
-            points = points.reshape(h, w, 3)
+            points = points.reshape(self.h, self.w, 3)
 
             roi_points = points[self.roi_mask]
             roi_points = roi_points[np.isfinite(roi_points[:,2])]
@@ -276,7 +290,9 @@ class QrCamera:
             self.plane = self.__estimate_plane(roi_points)
             print("Piano stimato:", self.plane)
 
-    def __point_plane_distance(self, points):
+    def __point_plane_distance(self, points, plane = None):
+        if plane is None:
+            plane = self.plane
         a, b, c, d = self.plane
         num = a*points[:,0] + b*points[:,1] + c*points[:,2] + d
         den = np.sqrt(a*a + b*b + c*c)
@@ -297,8 +313,8 @@ class QrCamera:
         roi_points = roi_points[valid]
 
         #Table re-calibration
-        new_plane = estimate_plane(roi_points)
-        new_distances = -point_plane_distance(roi_points, new_plane)
+        new_plane = self.__estimate_plane(roi_points)
+        new_distances = -self.__point_plane_distance(roi_points, new_plane)
         std_height = np.std(new_distances)
         if std_height < THRESH_STD:
             self.plane = new_plane
@@ -317,9 +333,6 @@ class QrCamera:
         object_mask = (height_map > MIN_HEIGHT_THRESHOLD)
         occlusion = np.sum(object_mask) > 50
         
-        if not occlusion: 
-           table_calibration(depth_frame)
-        
         return occlusion
 
     def read_qr(self):
@@ -333,7 +346,7 @@ class QrCamera:
 
         img = np.asanyarray(color_frame.get_data())
         x0, y0, x1, y1 = ROI_QR
-        img = img[y0:y1, x0,x1]
+        img = img[y0:y1, x0:x1]
 
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         gray = cv2.GaussianBlur(gray, (3, 3), 0)

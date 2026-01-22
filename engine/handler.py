@@ -1,5 +1,5 @@
-from ..hardware.camera import ObjCamera, QrCamera
-from ..hardware.gpio import Light, Button
+import time
+from hardware.camera import ObjCamera, QrCamera, SharedQRState
 from engine.event import Event
 
 NO_OBJECT = 0
@@ -11,14 +11,21 @@ PRESSED = 1
 NO_QR = 0
 QR = 1
 
+THERE_IS_LED = False
+JETSON = False
+
+if JETSON:
+    from hardware.gpio import Light, Button
+
 def ObjectDetectionHandler(event_queue, node_id, event_type: str, file_bag : str = None, led_pin : int = None):
     assert event_type in ['ENTER_DETECT', 'EXIT_DETECT']
     
     camera = ObjCamera(file_bag)
-    light = Light(led_pin)
+    if THERE_IS_LED:
+        light = Light(led_pin)
     
     state = NO_OBJECT
-    min_off_time = 5
+    min_off_time = 0
     pending_since = None
 
     while True:
@@ -30,7 +37,8 @@ def ObjectDetectionHandler(event_queue, node_id, event_type: str, file_bag : str
             if state == NO_OBJECT:
                 if object_present:
                     state = OBJECT_PRESENT
-                    light.on()
+                    if THERE_IS_LED:
+                        light.on()
                     event_queue.put(Event(source=node_id, type=event_type, timestamp=now))
                     #return "ENTER"
 
@@ -41,12 +49,13 @@ def ObjectDetectionHandler(event_queue, node_id, event_type: str, file_bag : str
                         pending_since = now
                     elif now - pending_since >= min_off_time:
                         state = NO_OBJECT
-                        light.off()
+                        if THERE_IS_LED:
+                            light.off()
                         pending_since = None
                         #return "EXIT"
                 else:
                     pending_since = None
-        time.sleep(0.1)
+        #time.sleep(0.1)
 
 def ButtonPressHandler(event_queue, node_id, button_pin:int = None):
     button = Button(button_pin)
@@ -89,9 +98,9 @@ def QrHandler(event_queue, node_id, shared_qr_state:SharedQRState, file_bag : st
     camera = QrCamera(shared_qr_state, file_bag)
 
     state = NO_QR
-    min_on_time = 2
-    min_off_time = 2
-    min_change_time = 2
+    min_on_time = 0.5
+    min_off_time = 0.5
+    min_change_time = 0.5
     pending_since = None
     pending_change = None
     last_qr = None
@@ -114,36 +123,37 @@ def QrHandler(event_queue, node_id, shared_qr_state:SharedQRState, file_bag : st
                     state = QR
                     pending_since = None
                     shared_qr_state.update(qr, now)
-                    event_queue.put(Event(source=node_id, type='NEW_QR', timestamp=now, qr=qr))
+                    event_queue.put(Event(source=node_id, type='QR_APPEND', timestamp=now, qr=qr))
             else:
                 pending_since = None
                 last_qr = None
 
         # Stato: QR
         elif state == QR:
-            if (qr is None ) and (not occlusion):
-                if pending_since is None:
-                    pending_since = now
-                elif now - pending_since >= min_off_time:
-                    state = NO_QR
-                    pending_since = None
-                    shared_qr_state.update(None, now)
-                    event_queue.put(Event(source=node_id, type='NO_QR', timestamp=now, qr=last_qr))
-                    last_qr = None
-            else:
-                pending_since = None
-                if not qr == last_qr:
-                    if pending_change is None:
-                        pending_change = now
-                    elif now - pending_change >= min_change_time:
+            if (not occlusion):
+                if (qr is None ):
+                    if pending_since is None:
+                        pending_since = now
+                    elif now - pending_since >= min_off_time:
+                        state = NO_QR
+                        pending_since = None
                         shared_qr_state.update(None, now)
-                        event_queue.put(Event(source=node_id, type='NO_QR', timestamp=now, qr = last_qr))
-                        shared_qr_state.update(qr, now)
-                        event_queue.put(Event(source=node_id, type='NEW_QR', timestamp=now, qr = qr))
-                        last_qr = qr
-                        pending_change = None
+                        event_queue.put(Event(source=node_id, type='QR_REMOVED', timestamp=now, qr=last_qr))
+                        last_qr = None
                 else:
-                    pending_change = None
+                    pending_since = None
+                    if not (qr == last_qr):
+                        if pending_change is None:
+                            pending_change = now
+                        elif now - pending_change >= min_change_time:
+                            shared_qr_state.update(None, now)
+                            event_queue.put(Event(source=node_id, type='QR_REMOVED', timestamp=now, qr = last_qr))
+                            shared_qr_state.update(qr, now)
+                            event_queue.put(Event(source=node_id, type='QR_APPEND', timestamp=now, qr = qr))
+                            last_qr = qr
+                            pending_change = None
+                    else:
+                        pending_change = None
 
             
                 

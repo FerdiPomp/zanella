@@ -55,7 +55,7 @@ class USBReceiver:
         threading.Thread(target=accept_loop, daemon=True).start()
 
 class USBSender:
-    def __init__(self, server_ip==SERVER_URL, port=SERVER_PORT):
+    def __init__(self, server_ip=SERVER_URL, port=SERVER_PORT):
         self.server_ip = server_ip
         self.port = port
         self.socket = None

@@ -1,4 +1,6 @@
 import argparse
+import keyboard
+import time
 
 from engine.node import EnterNode, ExitNode, EnvNode
 
@@ -28,3 +30,7 @@ elif args.node_id=='B':
 elif args.node_id=='C':
     node = EnvNode(node_id=args.node_id, workspace=args.workspace, broker_ip=args.broker_ip, topic=args.topic)
     node.start(file_bag=args.file_bag)
+
+#TODO: implement more correct way to quit with the thread (stop_event = threading.Event())
+while True:
+    time.sleep(1)
