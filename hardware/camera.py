@@ -5,6 +5,8 @@ import cv2
 import time
 #from pyzbar.pyzbar import decode
 from pylibdmtx.pylibdmtx import decode
+from sklearn.linear_model import RANSACRegressor
+from sklearn.linear_model import LinearRegression
 import threading
 
 # ROI
@@ -26,6 +28,7 @@ MAX_LEN = 2
 
 class ObjCamera:
     def __init__(self, file_bag : str = None):
+        self.pipeline = None
         self.pipeline = rs.pipeline()
         config = rs.config()
 
@@ -51,7 +54,8 @@ class ObjCamera:
         self.expected_hu_set = np.load("expected_shape/expected_hu.npy")
 
     def __del__(self):
-        self.pipeline.stop()
+        if self.pipeline is not None:
+            self.pipeline.stop()
 
     def table_calibration(self, depth_frame=None):
         if depth_frame is None:
@@ -74,19 +78,33 @@ class ObjCamera:
         roi_points = points[self.roi_mask]
         roi_points = roi_points[np.isfinite(roi_points[:,2])]
 
+        #TODO: check for not None output
         self.plane = self.__estimate_plane(roi_points)
         print("Piano stimato:", self.plane)
 
+    #TODO: magari trovare un modo più sofisticato di fare sta cosa...
     def __estimate_plane(self, points):
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(points)
+        assert points.ndim == 2 and points.shape[1] == 3
 
-        plane, inliers = pcd.segment_plane(
-            distance_threshold=PLANE_THRESHOLD,
-            ransac_n=5000,
-            num_iterations=100
+        X = points[:, :2]   # x, y
+        y = points[:, 2]    # z
+
+        ransac = RANSACRegressor(
+            estimator=LinearRegression(),
+            residual_threshold=PLANE_THRESHOLD,
+            min_samples=5000,
+            max_trials=100
         )
-        return plane
+        try:
+            ransac.fit(X, y)
+
+            # Piano: z = ax + by + c
+            a_xy = ransac.estimator_.coef_
+            c_z = ransac.estimator_.intercept_
+        except:
+            return None
+
+        return np.array([a_xy[0], a_xy[1], -1.0, c_z], dtype=np.float64)
 
     def __depth_to_points(self, depth_frame):
         points = self.pc.calculate(depth_frame)
@@ -146,12 +164,13 @@ class ObjCamera:
 
         #Table re-calibration
         new_plane = self.__estimate_plane(roi_points)
-        new_distances = -self.__point_plane_distance(roi_points, new_plane)
-        std_height = np.std(new_distances)
-        if std_height < THRESH_STD:
-            self.plane = new_plane
+        if new_plane is not None:
+            new_distances = self.__point_plane_distance(roi_points, new_plane)
+            std_height = np.std(new_distances)
+            if std_height < THRESH_STD:
+                self.plane = new_plane
 
-        distances = -self.__point_plane_distance(roi_points)
+        distances = self.__point_plane_distance(roi_points)
 
         height_map = np.zeros((self.h, self.w), dtype=np.float32)
         roi_indices = np.argwhere(self.roi_mask)
@@ -217,6 +236,7 @@ class QrCamera:
     def __init__(self, shared_qr_state:SharedQRState, file_bag : str = None):
         self.shared_qr_state = shared_qr_state
         self._last_qr = None
+        self.pipeline = None
         self.pipeline = rs.pipeline()
         config = rs.config()
 
@@ -239,15 +259,8 @@ class QrCamera:
         self.table_calibration()
 
     def __del__(self):
-        self.pipeline.stop()
-    
-    def __point_plane_distance(self, points, plane = None):
-        if plane is None:
-            plane = self.plane
-        a, b, c, d = plane
-        num = a*points[:,0] + b*points[:,1] + c*points[:,2] + d
-        den = np.sqrt(a*a + b*b + c*c)
-        return num / den
+        if self.pipeline is not None:
+            self.pipeline.stop()
 
     def __depth_to_points(self, depth_frame):
         points = self.pc.calculate(depth_frame)
@@ -255,15 +268,27 @@ class QrCamera:
         return verts.reshape(-1, 3)
 
     def __estimate_plane(self, points):
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(points)
+        assert points.ndim == 2 and points.shape[1] == 3
 
-        plane, inliers = pcd.segment_plane(
-            distance_threshold=PLANE_THRESHOLD,
-            ransac_n=5000,
-            num_iterations=100
+        X = points[:, :2]   # x, y
+        y = points[:, 2]    # z
+
+        ransac = RANSACRegressor(
+            estimator=LinearRegression(),
+            residual_threshold=PLANE_THRESHOLD,
+            min_samples=5000,
+            max_trials=100
         )
-        return plane
+        try:
+            ransac.fit(X, y)
+
+            # Piano: z = ax + by + c
+            a_xy = ransac.estimator_.coef_
+            c_z = ransac.estimator_.intercept_
+        except:
+            return None
+
+        return np.array([a_xy[0], a_xy[1], -1.0, c_z], dtype=np.float64)
 
 
     def table_calibration(self, depth_frame = None):
@@ -314,13 +339,14 @@ class QrCamera:
 
         #Table re-calibration
         new_plane = self.__estimate_plane(roi_points)
-        new_distances = -self.__point_plane_distance(roi_points, new_plane)
-        std_height = np.std(new_distances)
-        if std_height < THRESH_STD:
-            self.plane = new_plane
+        if new_plane is not None:
+            new_distances = self.__point_plane_distance(roi_points, new_plane)
+            std_height = np.std(new_distances)
+            if std_height < THRESH_STD:
+                self.plane = new_plane
 
 
-        distances = -self.__point_plane_distance(roi_points)
+        distances = self.__point_plane_distance(roi_points)
 
         height_map = np.zeros((self.h, self.w), dtype=np.float32)
         roi_indices = np.argwhere(self.roi_mask)

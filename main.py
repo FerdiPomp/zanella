@@ -1,8 +1,9 @@
 import argparse
-import keyboard
 import time
-
 from engine.node import EnterNode, ExitNode, EnvNode
+import threading
+
+import sys
 
 
 parser = argparse.ArgumentParser(description="Esempio con argparse")
@@ -32,5 +33,14 @@ elif args.node_id=='C':
     node.start(file_bag=args.file_bag)
 
 #TODO: implement more correct way to quit with the thread (stop_event = threading.Event())
-while True:
-    time.sleep(1)
+print("Enter q to exit")
+for line in sys.stdin:
+    if line.strip().lower() == 'q':
+        print("Program exit")
+        break
+
+node.stop()
+
+
+
+

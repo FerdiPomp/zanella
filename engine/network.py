@@ -98,7 +98,7 @@ class MQTTSender:
         )
 
 class HTTPSender:
-    def __init__(self, server_ip, port=5000, endpoint="/event", timeout=1):
+    def __init__(self, server_ip=SERVER_URL, port=5000, endpoint="/event", timeout=1):
         self.server_ip = server_ip
         self.port = port
         self.endpoint = endpoint
@@ -127,7 +127,7 @@ class HTTPSender:
             time.sleep(1)
         
 class HTTPReceiver:
-    def __init__(self, host="0.0.0.0", port=5000):
+    def __init__(self, host=SERVER_URL, port=5000):
         self.host = host
         self.port = port
         self.app = Flask(__name__)

@@ -9,15 +9,24 @@ from engine.network import USBSender, USBReceiver, MQTTSender
 
 ONLINE_SENDER = False
 ONLINE_RECIEVER = False
+ONLINE_SENDER_ENV = False
 
 
 class BaseNode:
     def __init__(self, node_id):
         self.node_id = node_id
         self.event_queue = Queue()
+        self.threads = []
+        self.stop_event = threading.Event()
 
     def start(self):
         raise NotImplementedError
+    
+    def stop(self):
+        self.stop_event.set()
+        for t in self.threads:
+            t.join()
+
 
 class EnterNode(BaseNode):
     def __init__(self, node_id):
@@ -35,16 +44,19 @@ class EnterNode(BaseNode):
 
 
     def start(self, file_bag:str=None, led_pin : int = None):
-        threading.Thread(
+        self.threads.append(threading.Thread(
                 target=ObjectDetectionHandler,
-                args=(self.event_queue, self.node_id, 'ENTER_DETECT', file_bag, led_pin),
-                daemon=True
-            ).start()
+                args=(self.stop_event, self.event_queue, self.node_id, 'ENTER_DETECT', file_bag, led_pin),
+                daemon=False
+            ))
 
         threading.Thread(
             target=self._network_loop,
             daemon=True
         ).start()
+
+        for t in self.threads:
+            t.start()
 
 class ExitNode(BaseNode):
     def __init__(self, node_id):
@@ -62,27 +74,30 @@ class ExitNode(BaseNode):
                 print(event)
 
     def start(self, file_bag:str=None, led_pin : int = None, button_pin:int = None):
-        threading.Thread(
+        self.threads.append(threading.Thread(
                 target=ObjectDetectionHandler,
-                args=(self.event_queue, self.node_id, 'EXIT_DETECT', file_bag, led_pin),
-                daemon=True
-            ).start()
+                args=(self.stop_event, self.event_queue, self.node_id, 'EXIT_DETECT', file_bag, led_pin),
+                daemon=False
+            ))
         
-        threading.Thread(
+        self.threads.append(threading.Thread(
                 target=ButtonPressHandler,
-                args=(self.event_queue, self.node_id, button_pin),
-                daemon=True
-            ).start()
+                args=(self.stop_event, self.event_queue, self.node_id, button_pin),
+                daemon=False
+            ))
         
         threading.Thread(
             target=self._network_loop,
             daemon=True
         ).start()
 
+        for t in self.threads:
+            t.start()
+
 class EnvNode(BaseNode):
     def __init__(self, node_id, workspace:str, broker_ip, topic ):
         super().__init__(node_id)
-        if ONLINE_SENDER:
+        if ONLINE_SENDER_ENV:
             self.sender = MQTTSender(broker_ip, topic)
         self.receiver = USBReceiver()
         self.shared_qr_state = SharedQRState()
@@ -114,7 +129,7 @@ class EnvNode(BaseNode):
         return new_event
 
     def _network_loop(self):
-        if ONLINE_SENDER:
+        if ONLINE_SENDER_ENV:
             while True:
                 event = self.event_queue.get()
                 new_event = self._build_event(event)
@@ -129,13 +144,16 @@ class EnvNode(BaseNode):
         if ONLINE_RECIEVER:
             self.receiver.start(self.event_queue)
 
-        threading.Thread(
+        self.threads.append(threading.Thread(
                 target=QrHandler,
-                args=(self.event_queue, self.node_id, self.shared_qr_state, file_bag),
-                daemon=True
-            ).start()
+                args=(self.stop_event, self.event_queue, self.node_id, self.shared_qr_state, file_bag),
+                daemon=False
+            ))
     
         threading.Thread(
             target=self._network_loop,
             daemon=True
         ).start()
+
+        for t in self.threads:
+            t.start()

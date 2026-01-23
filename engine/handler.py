@@ -17,7 +17,7 @@ JETSON = False
 if JETSON:
     from hardware.gpio import Light, Button
 
-def ObjectDetectionHandler(event_queue, node_id, event_type: str, file_bag : str = None, led_pin : int = None):
+def ObjectDetectionHandler(stop_event, event_queue, node_id, event_type: str, file_bag : str = None, led_pin : int = None):
     assert event_type in ['ENTER_DETECT', 'EXIT_DETECT']
     
     camera = ObjCamera(file_bag)
@@ -28,7 +28,7 @@ def ObjectDetectionHandler(event_queue, node_id, event_type: str, file_bag : str
     min_off_time = 0
     pending_since = None
 
-    while True:
+    while not stop_event.is_set():
         object_present = camera.find_object()
 
         if object_present is not None:
@@ -57,7 +57,7 @@ def ObjectDetectionHandler(event_queue, node_id, event_type: str, file_bag : str
                     pending_since = None
         #time.sleep(0.1)
 
-def ButtonPressHandler(event_queue, node_id, button_pin:int = None):
+def ButtonPressHandler(stop_event, event_queue, node_id, button_pin:int = None):
     button = Button(button_pin)
 
     state = NO_PRESS
@@ -65,7 +65,7 @@ def ButtonPressHandler(event_queue, node_id, button_pin:int = None):
     min_off_time = 2
     pending_since = None
 
-    while True:
+    while not stop_event.is_set():
         press = button.pressed()
         now = time.time()
 
@@ -94,7 +94,7 @@ def ButtonPressHandler(event_queue, node_id, button_pin:int = None):
             else:
                 pending_since = None
 
-def QrHandler(event_queue, node_id, shared_qr_state:SharedQRState, file_bag : str = None):
+def QrHandler(stop_event, event_queue, node_id, shared_qr_state:SharedQRState, file_bag : str = None):
     camera = QrCamera(shared_qr_state, file_bag)
 
     state = NO_QR
@@ -105,7 +105,7 @@ def QrHandler(event_queue, node_id, shared_qr_state:SharedQRState, file_bag : st
     pending_change = None
     last_qr = None
 
-    while True:
+    while not stop_event.is_set():
         qr, occlusion = camera.read_qr()
         now = time.time()
 
