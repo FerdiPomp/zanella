@@ -9,7 +9,7 @@ from sklearn.linear_model import RANSACRegressor
 from sklearn.linear_model import LinearRegression
 import threading
 
-import config as CONF
+import config as CONFIG
 
 class ObjCamera:
     def __init__(self, file_bag : str = None):
@@ -370,5 +370,5 @@ class QrCamera:
             return codes[0].data.decode("utf-8",  errors="replace"), occlusion
         elif codes and len(code)>1:
             return None, True
-            
+
         return None, occlusion
