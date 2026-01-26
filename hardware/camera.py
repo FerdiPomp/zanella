@@ -1,6 +1,5 @@
 import pyrealsense2 as rs
 import numpy as np
-import open3d as o3d
 import cv2
 import time
 #from pyzbar.pyzbar import decode
