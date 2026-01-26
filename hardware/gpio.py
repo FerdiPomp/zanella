@@ -1,18 +1,12 @@
 import Jetson.GPIO as GPIO
 import time
-
-#TODO: Re-numerate pin BEFORE real testing
-BUTTON_PIN = 16
-LED_PIN = 12
+import config as CONFIG
 
 class Button:
-    def __init__(self, button_pin:int=None):
+    def __init__(self, button_pin:int=CONFIG.BUTTON_PIN):
+        self.button_pin = button_pin
         GPIO.setmode(GPIO.BOARD)
         GPIO.setup(button_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-        if button_pin is not None:
-            self.button_pin = button_pin
-        else:
-            self.button_pin = BUTTON_PIN
     def __del__(self):
         GPIO.cleanup()
 
@@ -20,24 +14,23 @@ class Button:
         return GPIO.input(self.button_pin) == GPIO.LOW
 
 class Light:
-    def __init__(self, led_pin:int=None):
+    def __init__(self, led_pin:int=CONFIG.LED_PIN):
+        self.led_pin = led_pin
         GPIO.setmode(GPIO.BOARD)
-        if led_pin is not None:
-            GPIO.setup(led_pin, GPIO.OUT)
-        else:
-            GPIO.setup(LED_PIN, GPIO.OUT)
+        GPIO.setup(self.led_pin, GPIO.OUT)
+        
 
     def __del__(self):
         GPIO.cleanup()
 
     def step(self, led_on:bool):
         if led_on:
-            GPIO.output(LED_PIN, GPIO.HIGH)
+            GPIO.output(self.led_pin, GPIO.HIGH)
         else:
-            GPIO.output(LED_PIN, GPIO.LOW)
+            GPIO.output(self.led_pin, GPIO.LOW)
     
     def on(self):
-        GPIO.output(LED_PIN, GPIO.HIGH)
+        GPIO.output(self.led_pin, GPIO.HIGH)
 
     def off(self):
-        GPIO.output(LED_PIN, GPIO.LOW)
+        GPIO.output(self.led_pin, GPIO.LOW)

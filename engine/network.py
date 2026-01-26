@@ -9,11 +9,10 @@ from flask import Flask, request, jsonify
 
 from engine.event import Event
 
-SERVER_URL = "0.0.0.0"
-SERVER_PORT = 9000
+import config as CONFIG
 
 class USBReceiver:
-    def __init__(self, host=SERVER_URL, port=SERVER_PORT):
+    def __init__(self, host=CONFIG.SERVER_URL, port=CONFIG.SERVER_PORT):
         self.host = host
         self.port = port
 
@@ -55,7 +54,7 @@ class USBReceiver:
         threading.Thread(target=accept_loop, daemon=True).start()
 
 class USBSender:
-    def __init__(self, server_ip=SERVER_URL, port=SERVER_PORT):
+    def __init__(self, server_ip=CONFIG.SERVER_URL, port=CONFIG.SERVER_PORT):
         self.server_ip = server_ip
         self.port = port
         self.socket = None
@@ -98,7 +97,7 @@ class MQTTSender:
         )
 
 class HTTPSender:
-    def __init__(self, server_ip=SERVER_URL, port=5000, endpoint="/event", timeout=1):
+    def __init__(self, server_ip=CONFIG.SERVER_URL, port=CONFIG.SERVER_PORT, endpoint="/event", timeout=1):
         self.server_ip = server_ip
         self.port = port
         self.endpoint = endpoint
@@ -127,7 +126,7 @@ class HTTPSender:
             time.sleep(1)
         
 class HTTPReceiver:
-    def __init__(self, host=SERVER_URL, port=5000):
+    def __init__(self, host=CONFIG.SERVER_URL, port=CONFIG.SERVER_PORT):
         self.host = host
         self.port = port
         self.app = Flask(__name__)

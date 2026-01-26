@@ -7,9 +7,7 @@ from hardware.camera import SharedQRState
 from engine.handler import ObjectDetectionHandler, ButtonPressHandler, QrHandler
 from engine.network import USBSender, USBReceiver, MQTTSender
 
-ONLINE_SENDER = False
-ONLINE_RECIEVER = False
-ONLINE_SENDER_ENV = False
+import confgi as CONFIG
 
 
 class BaseNode:
@@ -33,7 +31,7 @@ class EnterNode(BaseNode):
         super().__init__(node_id)
         self.sender = USBSender()
     def _network_loop(self):
-        if ONLINE_SENDER:
+        if CONFIG.ONLINE_SENDER:
             while True:
                 event = self.event_queue.get()
                 self.sender.send(event)
@@ -64,7 +62,7 @@ class ExitNode(BaseNode):
         self.sender = USBSender()
     
     def _network_loop(self):
-        if ONLINE_SENDER:
+        if CONFIG.ONLINE_SENDER:
             while True:
                 event = self.event_queue.get()
                 self.sender.send(event)
@@ -97,7 +95,7 @@ class ExitNode(BaseNode):
 class EnvNode(BaseNode):
     def __init__(self, node_id, workspace:str, broker_ip, topic ):
         super().__init__(node_id)
-        if ONLINE_SENDER_ENV:
+        if CONFIG.ONLINE_SENDER_ENV:
             self.sender = MQTTSender(broker_ip, topic)
         self.receiver = USBReceiver()
         self.shared_qr_state = SharedQRState()
@@ -129,7 +127,7 @@ class EnvNode(BaseNode):
         return new_event
 
     def _network_loop(self):
-        if ONLINE_SENDER_ENV:
+        if CONFIG.ONLINE_SENDER_ENV:
             while True:
                 event = self.event_queue.get()
                 new_event = self._build_event(event)
@@ -141,7 +139,7 @@ class EnvNode(BaseNode):
                 print(new_event)            
 
     def start(self, file_bag:str=None):
-        if ONLINE_RECIEVER:
+        if CONFIG.ONLINE_RECIEVER:
             self.receiver.start(self.event_queue)
 
         self.threads.append(threading.Thread(

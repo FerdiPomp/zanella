@@ -9,22 +9,7 @@ from sklearn.linear_model import RANSACRegressor
 from sklearn.linear_model import LinearRegression
 import threading
 
-# ROI
-ROI = (150, 90, 440, 400)  # x0, y0, x1, y1
-ROI_QR = (300, 300, 600, 600)  # x0, y0, x1, y1 #TODO: set ROI for QR code
-
-# RANSAC
-PLANE_THRESHOLD = 0.005  
-
-SHAPE_THRESHOLD = 1.5
-
-MIN_HEIGHT_THRESHOLD = 0.05
-MAX_HEIGHT_THRESHOLD = 0.30
-MIN_AREA_PIXELS = 5000
-MAX_OCCUPATION = 100
-THRESH_STD = 0.1
-MAX_LEN = 2
-
+import config as CONF
 
 class ObjCamera:
     def __init__(self, file_bag : str = None):
@@ -35,7 +20,7 @@ class ObjCamera:
         if file_bag is not None:
             config.enable_device_from_file(file_bag,  repeat_playback=False)
         else:
-            config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
+            config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
 
         profile = self.pipeline.start(config)
         self.depth_scale = profile.get_device().first_depth_sensor().get_depth_scale()
@@ -67,7 +52,7 @@ class ObjCamera:
 
         depth = np.asanyarray(depth_frame.get_data())
         self.h, self.w = depth.shape
-        x0, y0, x1, y1 = ROI
+        x0, y0, x1, y1 = CONFIG.ROI
 
         self.roi_mask = np.zeros((self.h, self.w), dtype=bool)
         self.roi_mask[y0:y1, x0:x1] = True
@@ -91,7 +76,7 @@ class ObjCamera:
 
         ransac = RANSACRegressor(
             estimator=LinearRegression(),
-            residual_threshold=PLANE_THRESHOLD,
+            residual_threshold=CONFIG.PLANE_THRESHOLD,
             min_samples=5000,
             max_trials=100
         )
@@ -135,7 +120,7 @@ class ObjCamera:
         for label in range(1, num_labels):
             component = (labels == label)
             area = np.sum(component)
-            if area < MIN_AREA_PIXELS:
+            if area < CONFIG.MIN_AREA_PIXELS:
                 continue
 
             mask_uint8 = (component.astype(np.uint8)) * 255
@@ -144,7 +129,7 @@ class ObjCamera:
             hu = (np.sign(hu) * np.log10(np.abs(hu) + 1e-12)).flatten()
             distances = np.linalg.norm(self.expected_hu_set - hu, axis=1)
             min_distance = np.min(distances)
-            if min_distance < SHAPE_THRESHOLD:
+            if min_distance < CONFIG.SHAPE_THRESHOLD:
                 return True
         return False
 
@@ -167,7 +152,7 @@ class ObjCamera:
         if new_plane is not None:
             new_distances = self.__point_plane_distance(roi_points, new_plane)
             std_height = np.std(new_distances)
-            if std_height < THRESH_STD:
+            if std_height < CONFIG.THRESH_STD:
                 self.plane = new_plane
 
         distances = self.__point_plane_distance(roi_points)
@@ -180,13 +165,13 @@ class ObjCamera:
             if hgt > height_map[y, x]:
                 height_map[y, x] = hgt
 
-        object_mask = (height_map > MIN_HEIGHT_THRESHOLD) & (height_map < MAX_HEIGHT_THRESHOLD)
-        object_detected = np.sum(object_mask) > MIN_AREA_PIXELS
+        object_mask = (height_map > CONFIG.MIN_HEIGHT_THRESHOLD) & (height_map < CONFIG.MAX_HEIGHT_THRESHOLD)
+        object_detected = np.sum(object_mask) > CONFIG.MIN_AREA_PIXELS
         shape_ok = self.__shape_validation(object_mask)
         
         if object_detected:
             self.detect_queue.append(object_mask)
-            if len(self.detect_queue)>MAX_LEN:
+            if len(self.detect_queue)>CONFIG.MAX_LEN:
                 self.detect_queue.pop(0)
                 if not self.obj_find:
                     self.obj_find = self.__there_is_obj() & shape_ok
@@ -243,7 +228,7 @@ class QrCamera:
         if file_bag is not None:
             config.enable_device_from_file(file_bag, repeat_playback=False)
         else:
-            config.enable_stream(rs.stream.color, 1920, 1080, rs.format.bgr8, 30)
+            config.enable_stream(rs.stream.color, 1280, 800, rs.format.bgr8, 30)
             config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
             
         profile = self.pipeline.start(config)
@@ -275,7 +260,7 @@ class QrCamera:
 
         ransac = RANSACRegressor(
             estimator=LinearRegression(),
-            residual_threshold=PLANE_THRESHOLD,
+            residual_threshold=CONFIG.PLANE_THRESHOLD,
             min_samples=5000,
             max_trials=100
         )
@@ -301,7 +286,7 @@ class QrCamera:
 
             depth = np.asanyarray(depth_frame.get_data())
             self.h, self.w = depth.shape
-            x0, y0, x1, y1 = ROI_QR
+            x0, y0, x1, y1 = CONFIG.ROI_QR
 
             self.roi_mask = np.zeros((self.h, self.w), dtype=bool)
             self.roi_mask[y0:y1, x0:x1] = True
@@ -342,7 +327,7 @@ class QrCamera:
         if new_plane is not None:
             new_distances = self.__point_plane_distance(roi_points, new_plane)
             std_height = np.std(new_distances)
-            if std_height < THRESH_STD:
+            if std_height < CONFIG.THRESH_STD:
                 self.plane = new_plane
 
 
@@ -356,7 +341,7 @@ class QrCamera:
             if hgt > height_map[y, x]:
                 height_map[y, x] = hgt
 
-        object_mask = (height_map > MIN_HEIGHT_THRESHOLD)
+        object_mask = (height_map > CONFIG.MIN_HEIGHT_THRESHOLD)
         occlusion = np.sum(object_mask) > 50
         
         return occlusion
@@ -371,7 +356,7 @@ class QrCamera:
             return None, occlusion
 
         img = np.asanyarray(color_frame.get_data())
-        x0, y0, x1, y1 = ROI_QR
+        x0, y0, x1, y1 = CONFIG.ROI_QR
         img = img[y0:y1, x0:x1]
 
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -383,4 +368,7 @@ class QrCamera:
 
         if codes and len(codes)==1:
             return codes[0].data.decode("utf-8",  errors="replace"), occlusion
+        elif codes and len(code)>1:
+            return None, True
+            
         return None, occlusion
