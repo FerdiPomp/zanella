@@ -7,7 +7,7 @@ from hardware.camera import SharedQRState
 from engine.handler import ObjectDetectionHandler, ButtonPressHandler, QrHandler
 from engine.network import USBSender, USBReceiver, MQTTSender
 
-import confgi as CONFIG
+import config as CONFIG
 
 
 class BaseNode:
