@@ -78,11 +78,12 @@ class ExitNode(BaseNode):
                 daemon=False
             ))
         
-        self.threads.append(threading.Thread(
-                target=ButtonPressHandler,
-                args=(self.stop_event, self.event_queue, self.node_id, button_pin),
-                daemon=False
-            ))
+        if CONFIG.THERE_IS_BUTTON:
+            self.threads.append(threading.Thread(
+                    target=ButtonPressHandler,
+                    args=(self.stop_event, self.event_queue, self.node_id, button_pin),
+                    daemon=False
+                ))
         
         threading.Thread(
             target=self._network_loop,

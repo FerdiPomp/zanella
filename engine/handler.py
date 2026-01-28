@@ -12,7 +12,7 @@ PRESSED = 1
 NO_QR = 0
 QR = 1
 
-THERE_IS_LED = False
+
 
 
 if CONFIG.IS_JETSON:

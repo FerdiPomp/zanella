@@ -39,6 +39,7 @@ LED_PIN = 12
 
 #----------------Handler Parameters------------------#
 THERE_IS_LED = False
+THERE_IS_BUTTON = False
 IS_JETSON = False
 
 #States for FSM.
@@ -63,12 +64,12 @@ QR_MIN_CHANGE_TIME = 1
 #----------------End Handler Parameters------------------#
 
 #----------------Node Parameters------------------#
-ONLINE_SENDER = False
-ONLINE_RECIEVER = False
+ONLINE_SENDER = True
+ONLINE_RECIEVER = True
 ONLINE_SENDER_ENV = False
 #----------------End Node Parameters------------------#
 
 #----------------Network Parameters------------------#
-SERVER_URL = "0.0.0.0"
+SERVER_URL = "192.168.1.103"
 SERVER_PORT = 9000
 #----------------End Network Parameters------------------#
