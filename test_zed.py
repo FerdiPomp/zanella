@@ -207,7 +207,7 @@ while True:
     # =====================
 
     vis = cv2.applyColorMap(
-        cv2.convertScaleAbs(depth, alpha=0.03),
+        cv2.convertScaleAbs(points[:,:,2], alpha=0.03),
         cv2.COLORMAP_JET
     )
 
