@@ -132,7 +132,7 @@ h, w, _ = points.shape
 x0, y0, x1, y1 = ROI
 
 roi_mask = np.zeros((h, w), dtype=bool)
-roi_mask[y0:y1, x0:x1, :] = True
+roi_mask[y0:y1, x0:x1] = True
 
 roi_points = points[roi_mask]
 roi_points = roi_points[np.isfinite(roi_points[:,2])]
