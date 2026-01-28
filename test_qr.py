@@ -20,7 +20,7 @@ pipeline = rs.pipeline()
 config = rs.config()
 
 if USE_BAG:
-    config.enable_device_from_file("./prove/dati_test/test_qr_3.bag",  repeat_playback=False)
+    config.enable_device_from_file("./prove/dati_test/calib_qr.bag",  repeat_playback=True)
     #config.enable_stream(rs.stream.color, rs.format.bgr8)
 else:
     config.enable_stream(rs.stream.color, 1920, 1080, rs.format.bgr8, 30)

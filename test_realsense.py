@@ -10,7 +10,7 @@ from sklearn.linear_model import LinearRegression
 # =====================
 
 # ROI del tavolo (da regolare)
-ROI = (150, 90, 440, 400)  # x0, y0, x1, y1
+ROI = (400, 200, 840, 580)#(150, 90, 440, 400)  # x0, y0, x1, y1
 
 # RANSAC
 PLANE_THRESH = 0.005  
@@ -36,7 +36,7 @@ pipeline = rs.pipeline()
 config = rs.config()
 
 if USE_BAG:
-    config.enable_device_from_file("./prove/dati_test/test_obj_3.bag",  repeat_playback=False)
+    config.enable_device_from_file("./prove/dati_test/calib_b.bag",  repeat_playback=True)
 else:
     config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
 
