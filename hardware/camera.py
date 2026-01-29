@@ -347,7 +347,7 @@ class QrCamera:
                 height_map[y, x] = hgt
 
         object_mask = (height_map > CONFIG.MIN_HEIGHT_THRESHOLD)
-        occlusion = np.sum(object_mask) > 50
+        occlusion = np.sum(object_mask) > CONFIG.OCCLUSION_THRESHOLD
         
         return occlusion
 

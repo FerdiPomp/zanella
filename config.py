@@ -31,7 +31,10 @@ MIN_AREA_PIXELS = 5000
 MAX_OCCUPATION = 100
 
 #Number of frame for debouncing object detection
-MAX_LEN = 2
+MAX_LEN = 5
+
+#Max number of pixel for detect occlusion on qr reading
+OCCLUSION_THRESHOLD = 100
 #----------------End Camera Parameters------------------#
 
 #----------------GPIO Parameters------------------#
