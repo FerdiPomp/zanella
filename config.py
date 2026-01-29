@@ -6,8 +6,12 @@
 #----------------Camera Parameters------------------#
 #ROI for obj detection camera
 ROI = (570, 90, 950, 600) # x0, y0, x1, y1
+#ROI for enter obj detection camera
+ROI_A = (570, 90, 950, 600) # x0, y0, x1, y1
+#ROI for exit obj detection camera
+ROI_B = (400, 200, 840, 580) # x0, y0, x1, y1
 #ROI for env camera
-ROI_QR = (600, 300, 600, 600) # x0, y0, w, h
+ROI_QR = (600, 300, 900, 600) # x0, y0, x1, y1
 
 #Threshold for plane calibration
 PLANE_THRESHOLD = 0.005  #5mm

@@ -25,7 +25,7 @@ if args.node_id=='A':
     node.start(file_bag=args.file_bag, led_pin=args.led_pin)
 
 elif args.node_id=='B':
-    node = ExitNodeNode(node_id=args.node_id)
+    node = ExitNode(node_id=args.node_id)
     node.start(file_bag=args.file_bag, led_pin=args.led_pin, button_pin=args.button_pin)
 
 elif args.node_id=='C':

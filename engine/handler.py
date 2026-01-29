@@ -20,8 +20,9 @@ if CONFIG.IS_JETSON:
 
 def ObjectDetectionHandler(stop_event, event_queue, node_id, event_type: str, file_bag : str = None, led_pin : int = None):
     assert event_type in ['ENTER_DETECT', 'EXIT_DETECT']
-    
-    camera = ObjCamera(file_bag)
+
+    is_enter_node = (node_id == 'A')
+    camera = ObjCamera(is_enter_node, file_bag)
     if CONFIG.THERE_IS_LED:
         light = Light(led_pin)
     

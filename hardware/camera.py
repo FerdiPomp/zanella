@@ -11,7 +11,12 @@ import threading
 import config as CONFIG
 
 class ObjCamera:
-    def __init__(self, file_bag : str = None):
+    def __init__(self, is_enter_node:bool,file_bag : str = None):
+        if is_enter_node:
+            self.ROI = CONFIG.ROI_A
+        else:
+            self.ROI = CONFIG.ROI_B
+
         self.pipeline = None
         self.pipeline = rs.pipeline()
         config = rs.config()
@@ -51,7 +56,7 @@ class ObjCamera:
 
         depth = np.asanyarray(depth_frame.get_data())
         self.h, self.w = depth.shape
-        x0, y0, x1, y1 = CONFIG.ROI
+        x0, y0, x1, y1 = self.ROI
 
         self.roi_mask = np.zeros((self.h, self.w), dtype=bool)
         self.roi_mask[y0:y1, x0:x1] = True
@@ -147,12 +152,12 @@ class ObjCamera:
         roi_points = roi_points[valid]
 
         #Table re-calibration
-        new_plane = self.__estimate_plane(roi_points)
-        if new_plane is not None:
-            new_distances = self.__point_plane_distance(roi_points, new_plane)
-            std_height = np.std(new_distances)
-            if std_height < CONFIG.THRESH_STD:
-                self.plane = new_plane
+        # new_plane = self.__estimate_plane(roi_points)
+        # if new_plane is not None:
+        #     new_distances = self.__point_plane_distance(roi_points, new_plane)
+        #     std_height = np.std(new_distances)
+        #     if std_height < CONFIG.THRESH_STD:
+        #         self.plane = new_plane
 
         distances = self.__point_plane_distance(roi_points)
 
@@ -227,7 +232,7 @@ class QrCamera:
         if file_bag is not None:
             config.enable_device_from_file(file_bag, repeat_playback=False)
         else:
-            config.enable_stream(rs.stream.color, 1280, 800, rs.format.bgr8, 30)
+            config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
             config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
             
         profile = self.pipeline.start(config)
@@ -285,6 +290,7 @@ class QrCamera:
 
             depth = np.asanyarray(depth_frame.get_data())
             self.h, self.w = depth.shape
+            
             x0, y0, x1, y1 = CONFIG.ROI_QR
 
             self.roi_mask = np.zeros((self.h, self.w), dtype=bool)
