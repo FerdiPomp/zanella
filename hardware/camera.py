@@ -265,7 +265,7 @@ class QrCamera:
         ransac = RANSACRegressor(
             estimator=LinearRegression(),
             residual_threshold=CONFIG.PLANE_THRESHOLD,
-            min_samples=5000,
+            min_samples=500,
             max_trials=100
         )
         try:
@@ -328,12 +328,12 @@ class QrCamera:
         roi_points = roi_points[valid]
 
         #Table re-calibration
-        new_plane = self.__estimate_plane(roi_points)
-        if new_plane is not None:
-            new_distances = self.__point_plane_distance(roi_points, new_plane)
-            std_height = np.std(new_distances)
-            if std_height < CONFIG.THRESH_STD:
-                self.plane = new_plane
+        # new_plane = self.__estimate_plane(roi_points)
+        # if new_plane is not None:
+        #     new_distances = self.__point_plane_distance(roi_points, new_plane)
+        #     std_height = np.std(new_distances)
+        #     if std_height < CONFIG.THRESH_STD:
+        #         self.plane = new_plane
 
 
         distances = self.__point_plane_distance(roi_points)
