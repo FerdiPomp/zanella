@@ -336,7 +336,7 @@ class QrCamera:
         #         self.plane = new_plane
 
 
-        distances = self.__point_plane_distance(roi_points)
+        distances = -self.__point_plane_distance(roi_points)
 
         height_map = np.zeros((self.h, self.w), dtype=np.float32)
         roi_indices = np.argwhere(self.roi_mask)
@@ -373,7 +373,7 @@ class QrCamera:
 
         if codes and len(codes)==1:
             return codes[0].data.decode("utf-8",  errors="replace"), occlusion
-        elif codes and len(code)>1:
+        elif codes and len(codes)>1:
             return None, True
 
         return None, occlusion

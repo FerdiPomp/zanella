@@ -34,7 +34,7 @@ MAX_OCCUPATION = 100
 MAX_LEN = 5
 
 #Max number of pixel for detect occlusion on qr reading
-OCCLUSION_THRESHOLD = 100
+OCCLUSION_THRESHOLD = 50
 #----------------End Camera Parameters------------------#
 
 #----------------GPIO Parameters------------------#
