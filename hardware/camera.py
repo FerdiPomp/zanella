@@ -281,29 +281,29 @@ class QrCamera:
 
 
     def table_calibration(self, depth_frame = None):
-            if depth_frame is None:
-                frames = self.pipeline.wait_for_frames()
-                depth_frame = frames.get_depth_frame()
-                if not depth_frame:
-                    print("No depth frame")
-                    return None
+        if depth_frame is None:
+            frames = self.pipeline.wait_for_frames()
+            depth_frame = frames.get_depth_frame()
+            if not depth_frame:
+                print("No depth frame")
+                return None
 
-            depth = np.asanyarray(depth_frame.get_data())
-            self.h, self.w = depth.shape
-            
-            x0, y0, x1, y1 = CONFIG.ROI_QR
+        depth = np.asanyarray(depth_frame.get_data())
+        self.h, self.w = depth.shape
+        
+        x0, y0, x1, y1 = CONFIG.ROI_QR
 
-            self.roi_mask = np.zeros((self.h, self.w), dtype=bool)
-            self.roi_mask[y0:y1, x0:x1] = True
+        self.roi_mask = np.zeros((self.h, self.w), dtype=bool)
+        self.roi_mask[y0:y1, x0:x1] = True
 
-            points = self.__depth_to_points(depth_frame)
-            points = points.reshape(self.h, self.w, 3)
+        points = self.__depth_to_points(depth_frame)
+        points = points.reshape(self.h, self.w, 3)
 
-            roi_points = points[self.roi_mask]
-            roi_points = roi_points[np.isfinite(roi_points[:,2])]
+        roi_points = points[self.roi_mask]
+        roi_points = roi_points[np.isfinite(roi_points[:,2])]
 
-            self.plane = self.__estimate_plane(roi_points)
-            print("Piano stimato:", self.plane)
+        self.plane = self.__estimate_plane(roi_points)
+        print("Piano stimato:", self.plane)
 
     def __point_plane_distance(self, points, plane = None):
         if plane is None:
@@ -371,6 +371,168 @@ class QrCamera:
         bw = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 31, 5)
 
         codes = decode(bw, timeout=150, max_count=2)
+
+        if codes and len(codes)==1:
+            return codes[0].data.decode("utf-8",  errors="replace"), occlusion
+        elif codes and len(codes)>1:
+            return None, True
+
+        return None, occlusion
+
+
+# TODO: questa può diventare sottoclasse di QrCamera
+class ZEDQrCamera():
+    def __init__(self, shared_qr_state:SharedQRState, file_bag : str = None):
+        self.shared_qr_state = shared_qr_state
+        self._last_qr = None
+        self.zed = None
+        self.zed = sl.Camera()
+
+        init_params = sl.InitParameters()
+
+        if file_bag is not None:
+            init_parameters.set_from_svo_file(file_bag)
+        else:
+            init_params.camera_resolution = sl.RESOLUTION.HD2K
+            init_params.depth_mode = sl.DEPTH_MODE.NEURAL
+            init_params.coordinate_units = sl.UNIT.METER
+            init_params.sdk_verbose = 1
+            
+        err = zed.open(init_params)
+        if err > sl.ERROR_CODE.SUCCESS:
+            print('Failure in opening zed')
+            exit(1)
+
+        self.runtime_params = sl.RuntimeParameters()
+        time.sleep(1)
+        print("First table calibration")
+        self.plane = None
+        self.roi_mask = None
+        self.h = None
+        self.w = None
+        self.table_calibration()
+
+    def __del__(self):
+        if self.zed is not None:
+            self.zed.close()
+            
+
+    def __depth_to_points(self, depth_frame):
+        points = self.pc.calculate(depth_frame)
+        verts = np.asanyarray(points.get_vertices()).view(np.float32)
+        return verts.reshape(-1, 3)
+
+    def __estimate_plane(self, points):
+        assert points.ndim == 2 and points.shape[1] == 3
+
+        X = points[:, :2]   # x, y
+        y = points[:, 2]    # z
+
+        ransac = RANSACRegressor(
+            estimator=LinearRegression(),
+            residual_threshold=CONFIG.PLANE_THRESHOLD,
+            min_samples=5000,
+            max_trials=100
+        )
+        try:
+            ransac.fit(X, y)
+
+            # Piano: z = ax + by + c
+            a_xy = ransac.estimator_.coef_
+            c_z = ransac.estimator_.intercept_
+        except:
+            return None
+
+        return np.array([a_xy[0], a_xy[1], -1.0, c_z], dtype=np.float64)
+
+
+    def table_calibration(self, depth_frame = None):
+        if zed.grab(self.runtime_params) == sl.ERROR_CODE.SUCCESS:
+            point_cloud = sl.Mat()
+            zed.retrieve_measure(point_cloud, sl.MEASURE.XYZ)
+        else:
+            print('Failure in grabbing ZED during table calibration')
+            exit(1)
+
+        depth = np.asanyarray(point_cloud.get_data())[:,:,:3]
+
+        self.h, self.w, _ = depth.shape
+        
+        x0, y0, x1, y1 = CONFIG.ROI_QR
+
+        self.roi_mask = np.zeros((self.h, self.w), dtype=bool)
+        self.roi_mask[y0:y1, x0:x1] = True
+
+        roi_points = depth[self.roi_mask]
+        roi_points = roi_points[np.isfinite(roi_points[:,2])]
+
+        self.plane = self.__estimate_plane(roi_points)
+        print("Piano stimato:", self.plane)
+
+    def __point_plane_distance(self, points, plane = None):
+        if plane is None:
+            plane = self.plane
+        a, b, c, d = self.plane
+        num = a*points[:,0] + b*points[:,1] + c*points[:,2] + d
+        den = np.sqrt(a*a + b*b + c*c)
+        return num / den
+
+    def find_occlusion(self):
+        if zed.grab(self.runtime_params) == sl.ERROR_CODE.SUCCESS:
+            point_cloud = sl.Mat()
+            zed.retrieve_measure(point_cloud, sl.MEASURE.XYZ)
+        else:
+            exit(1)
+
+        points = np.asanyarray(point_cloud.get_data())[:,:,:3]
+
+        roi_points = points[self.roi_mask].reshape(-1, 3)
+        valid = np.isfinite(roi_points[:,2])
+        roi_points = roi_points[valid]
+
+        #Table re-calibration
+        # new_plane = self.__estimate_plane(roi_points)
+        # if new_plane is not None:
+        #     new_distances = self.__point_plane_distance(roi_points, new_plane)
+        #     std_height = np.std(new_distances)
+        #     if std_height < CONFIG.THRESH_STD:
+        #         self.plane = new_plane
+
+
+        distances = self.__point_plane_distance(roi_points)
+
+        height_map = np.zeros((self.h, self.w), dtype=np.float32)
+        roi_indices = np.argwhere(self.roi_mask)
+        roi_heights = distances
+        
+        for (y, x), hgt in zip(roi_indices, roi_heights):
+            if hgt > height_map[y, x]:
+                height_map[y, x] = hgt
+
+        object_mask = (height_map > CONFIG.MIN_HEIGHT_THRESHOLD)
+        print(np.sum(object_mask))
+        occlusion = np.sum(object_mask) > CONFIG.OCCLUSION_THRESHOLD
+        
+        return occlusion
+
+    def read_qr(self):
+        occlusion = self.find_occlusion()
+        if zed.grab(runtime_params) == sl.ERROR_CODE.SUCCESS:
+            image = sl.Mat()
+            zed.retrieve_image(image, sl.VIEW.LEFT)
+        else:
+            exit(1)
+
+        img = np.asanyarray(image.get_data())[:,:,:3]
+        x0, y0, x1, y1 = CONFIG.ROI_QR
+        img = img[y0:y1, x0:x1]
+
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        gray = cv2.GaussianBlur(gray, (3, 3), 0)
+        #gray = cv2.equalizeHist(gray)
+        bw = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 31, 5)
+
+        codes = decode(bw, timeout=200, max_count=2)
 
         if codes and len(codes)==1:
             return codes[0].data.decode("utf-8",  errors="replace"), occlusion

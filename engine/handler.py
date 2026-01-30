@@ -1,7 +1,6 @@
 import time
-from hardware.camera import ObjCamera, QrCamera, SharedQRState
+from hardware.camera import ObjCamera, QrCamera, SharedQRState, ZEDQrCamera
 from engine.event import Event
-import config as CONFIG
 
 NO_OBJECT = 0
 OBJECT_PRESENT = 1
@@ -12,11 +11,6 @@ PRESSED = 1
 NO_QR = 0
 QR = 1
 
-
-
-
-if CONFIG.IS_JETSON:
-    from hardware.gpio import Light, Button
 
 def ObjectDetectionHandler(stop_event, event_queue, node_id, event_type: str, file_bag : str = None, led_pin : int = None):
     assert event_type in ['ENTER_DETECT', 'EXIT_DETECT']
@@ -94,8 +88,11 @@ def ButtonPressHandler(stop_event, event_queue, node_id, button_pin:int = None):
             else:
                 pending_since = None
 
-def QrHandler(stop_event, event_queue, node_id, shared_qr_state:SharedQRState, file_bag : str = None):
-    camera = QrCamera(shared_qr_state, file_bag)
+def QrHandler(stop_event, event_queue, node_id, shared_qr_state:SharedQRState, is_zed:bool, file_bag : str = None):
+    if is_zed:
+        camera = ZEDQrCamera(shared_qr_state, file_bag)
+    else:
+        camera = QrCamera(shared_qr_state, file_bag)
 
     state = CONFIG.NO_QR
     pending_since = None
@@ -152,6 +149,7 @@ def QrHandler(stop_event, event_queue, node_id, shared_qr_state:SharedQRState, f
                             pending_change = None
                     else:
                         pending_change = None
+
 
 # def SimButtonHandler(stop_event, event_queue, node_id):
 #     button = SimButton()

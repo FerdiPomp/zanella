@@ -4,6 +4,8 @@
 
 
 #----------------Camera Parameters------------------#
+IS_ZED = False
+
 ROI = (570, 90, 950, 600) # x0, y0, x1, y1
 #ROI for enter obj detection camera
 ROI_A = (410, 236, 820, 600) # x0, y0, x1, y1
