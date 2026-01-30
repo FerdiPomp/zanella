@@ -14,20 +14,18 @@ def depth_to_points(depth_frame):
     return verts.reshape(-1, 3)
 
 
-USE_BAG = True
-# ================== RealSense ==================
-pipeline = rs.pipeline()
-config = rs.config()
+zed = sl.Camera()
 
-if USE_BAG:
-    config.enable_device_from_file("./test_qr.bag",  repeat_playback=True)
-    #config.enable_stream(rs.stream.color, rs.format.bgr8)
-else:
-    config.enable_stream(rs.stream.color, 1920, 1080, rs.format.bgr8, 30)
-profile = pipeline.start(config)
-depth_scale = profile.get_device().first_depth_sensor().get_depth_scale()
-pc = rs.pointcloud()
-print("Lettura QR industriale (pyzbar) - premi 'q' per uscire")
+init_params = sl.InitParameters()
+init_params.camera_resolution = sl.RESOLUTION.HD2K
+init_params.depth_mode = sl.DEPTH_MODE.NEURAL
+init_params.coordinate_units = sl.UNIT.METER
+init_params.sdk_verbose = 1
+
+err = zed.open(init_params)
+if err > sl.ERROR_CODE.SUCCESS:
+    exit(1)
+
 
 # ================== ROI (MODIFICA QUI) ==================
 # Esempio: area centrale
@@ -38,19 +36,21 @@ ROI_H = 300
 
 try:
     while True:
-        frames = pipeline.wait_for_frames()
-        color_frame = frames.get_color_frame()
-        depth_frame = frames.get_depth_frame()
-        if not color_frame:
-            continue
-        depth = np.asanyarray(depth_frame.get_data())
-        depth = np.asanyarray(depth_frame.get_data())
-        h_d, w_d = depth.shape
+        runtime_params = sl.RuntimeParameters()
 
-        points = depth_to_points(depth_frame)
-        points = points.reshape(h_d, w_d, 3)
+        if zed.grab(runtime_params) == sl.ERROR_CODE.SUCCESS:
+            point_cloud = sl.Mat()
+            image = sl.Mat()
+            zed.retrieve_measure(point_cloud, sl.MEASURE.XYZ)
+            zed.retrieve_image(image, sl.VIEW.LEFT)
 
-        img = np.asanyarray(color_frame.get_data())
+        depth = np.asanyarray(point_cloud.get_data())[:,:,:3]
+        roi_depth = depth[roi_mask].reshape(-1, 3)
+        valid = np.isfinite(roi_depth[:,2])
+        roi_depth = roi_depth[valid]
+
+
+        img = np.asanyarray(image.get_data())[:,:,:3]
 
         # ================== Disegna ROI ==================
         cv2.rectangle(
@@ -77,7 +77,7 @@ try:
             5
         )
         # ================== Decode QR ==================
-        codes = decode(bw, timeout=300, max_count=2)
+        codes = decode(bw, timeout=200, max_count=2)
 
         for code in codes:
             try:

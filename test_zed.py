@@ -1,7 +1,5 @@
-
 import pyzed.sl as sl
 import numpy as np
-import open3d as o3d
 import cv2
 import time
 from sklearn.linear_model import RANSACRegressor
@@ -163,14 +161,14 @@ while True:
     valid = np.isfinite(roi_points[:,2])
     roi_points = roi_points[valid]
 
-    new_plane = estimate_plane(roi_points)
-    if new_plane is not None:
-        new_distances = point_plane_distance(roi_points, new_plane)
-        std_height = np.std(new_distances)
-        print(std_height)
-        if std_height < THRESH_STD:
-            plane = new_plane
-            print("Piano ricalibrato:", plane)
+    # new_plane = estimate_plane(roi_points)
+    # if new_plane is not None:
+    #     new_distances = point_plane_distance(roi_points, new_plane)
+    #     std_height = np.std(new_distances)
+    #     print(std_height)
+    #     if std_height < THRESH_STD:
+    #         plane = new_plane
+    #         print("Piano ricalibrato:", plane)
 
     distances = point_plane_distance(roi_points, plane)
     

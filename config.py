@@ -34,7 +34,7 @@ MAX_OCCUPATION = 100
 MAX_LEN = 5
 
 #Max number of pixel for detect occlusion on qr reading
-OCCLUSION_THRESHOLD = 50
+OCCLUSION_THRESHOLD = 1000
 #----------------End Camera Parameters------------------#
 
 #----------------GPIO Parameters------------------#
@@ -65,8 +65,8 @@ BUT_MIN_ON_TIME = 0.5
 BUT_MIN_OFF_TIME = 2
 
 QR_MIN_ON_TIME = 1
-QR_MIN_OFF_TIME = 1
-QR_MIN_CHANGE_TIME = 1
+QR_MIN_OFF_TIME = 3
+QR_MIN_CHANGE_TIME = 5
 #----------------End Handler Parameters------------------#
 
 #----------------Node Parameters------------------#
