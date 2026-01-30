@@ -145,7 +145,7 @@ class EnvNode(BaseNode):
 
         self.threads.append(threading.Thread(
                 target=QrHandler,
-                args=(self.stop_event, self.event_queue, self.node_id, self.shared_qr_state, CONFIG.IS_ZED, file_bag),
+                args=(self.stop_event, self.event_queue, self.node_id, self.shared_qr_state, file_bag),
                 daemon=False
             ))
     

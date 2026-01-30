@@ -2,6 +2,7 @@ import time
 from hardware.camera import ObjCamera, QrCamera, SharedQRState, ZEDQrCamera
 from engine.event import Event
 
+import config as CONFIG
 NO_OBJECT = 0
 OBJECT_PRESENT = 1
 
@@ -88,8 +89,8 @@ def ButtonPressHandler(stop_event, event_queue, node_id, button_pin:int = None):
             else:
                 pending_since = None
 
-def QrHandler(stop_event, event_queue, node_id, shared_qr_state:SharedQRState, is_zed:bool, file_bag : str = None):
-    if is_zed:
+def QrHandler(stop_event, event_queue, node_id, shared_qr_state:SharedQRState, file_bag : str = None):
+    if CONFIG.IS_ZED:
         camera = ZEDQrCamera(shared_qr_state, file_bag)
     else:
         camera = QrCamera(shared_qr_state, file_bag)
