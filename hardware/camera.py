@@ -1,4 +1,5 @@
 import pyrealsense2 as rs
+import pyzed.sl as sl
 import numpy as np
 import cv2
 import time
@@ -347,7 +348,6 @@ class QrCamera:
                 height_map[y, x] = hgt
 
         object_mask = (height_map > CONFIG.MIN_HEIGHT_THRESHOLD)
-        print(np.sum(object_mask))
         occlusion = np.sum(object_mask) > CONFIG.OCCLUSION_THRESHOLD
         
         return occlusion
@@ -510,7 +510,7 @@ class ZEDQrCamera():
                 height_map[y, x] = hgt
 
         object_mask = (height_map > CONFIG.MIN_HEIGHT_THRESHOLD)
-        print(np.sum(object_mask))
+        
         occlusion = np.sum(object_mask) > CONFIG.OCCLUSION_THRESHOLD
         
         return occlusion
