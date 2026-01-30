@@ -5,7 +5,7 @@ import time
 #from pyzbar.pyzbar import decode
 from pylibdmtx.pylibdmtx import decode
 
-from hardware.camera import QrCamera
+#from hardware.camera import QrCamera
 
 
 def depth_to_points(depth_frame):
@@ -20,7 +20,7 @@ pipeline = rs.pipeline()
 config = rs.config()
 
 if USE_BAG:
-    config.enable_device_from_file("./prove/dati_test/calib_qr.bag",  repeat_playback=True)
+    config.enable_device_from_file("./test_qr.bag",  repeat_playback=True)
     #config.enable_stream(rs.stream.color, rs.format.bgr8)
 else:
     config.enable_stream(rs.stream.color, 1920, 1080, rs.format.bgr8, 30)
@@ -31,9 +31,9 @@ print("Lettura QR industriale (pyzbar) - premi 'q' per uscire")
 
 # ================== ROI (MODIFICA QUI) ==================
 # Esempio: area centrale
-ROI_X = 300
+ROI_X = 500
 ROI_Y = 300
-ROI_W = 300
+ROI_W = 400
 ROI_H = 300
 
 try:
@@ -67,7 +67,7 @@ try:
         # ================== Preprocessing ==================
         gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
         gray = cv2.GaussianBlur(gray, (3, 3), 0)
-        #gray = cv2.equalizeHist(gray)
+        gray = cv2.equalizeHist(gray)
         bw = cv2.adaptiveThreshold(
             gray,
             255,
@@ -77,7 +77,7 @@ try:
             5
         )
         # ================== Decode QR ==================
-        codes = decode(bw, timeout=150, max_count=2)
+        codes = decode(bw, timeout=200, max_count=2)
 
         for code in codes:
             try:

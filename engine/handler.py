@@ -64,6 +64,7 @@ def ButtonPressHandler(stop_event, event_queue, node_id, button_pin:int = None):
     state = CONFIG.NO_PRESS
     pending_since = None
 
+    #TODO: ADD LED UP-DOWN inside this thing
     while not stop_event.is_set():
         press = button.pressed()
         now = time.time()
@@ -152,7 +153,19 @@ def QrHandler(stop_event, event_queue, node_id, shared_qr_state:SharedQRState, f
                     else:
                         pending_change = None
 
-            
+# def SimButtonHandler(stop_event, event_queue, node_id):
+#     button = SimButton()
+#     state = CONFIG.NO_PRESS
+
+#     #TODO: ADD LED UP-DOWN inside this thing
+#     while not stop_event.is_set():
+#         press = False
+#         for line in sys.stdin:
+#         if line.strip().lower() == 'f':
+#             press = True
+#             event_queue.put(Event(source=node_id, type='PRESSED', timestamp=now))
+#             now = time.time()
+#             break
                 
 
             

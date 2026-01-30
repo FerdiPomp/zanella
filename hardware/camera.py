@@ -265,7 +265,7 @@ class QrCamera:
         ransac = RANSACRegressor(
             estimator=LinearRegression(),
             residual_threshold=CONFIG.PLANE_THRESHOLD,
-            min_samples=500,
+            min_samples=5000,
             max_trials=100
         )
         try:
@@ -336,7 +336,7 @@ class QrCamera:
         #         self.plane = new_plane
 
 
-        distances = -self.__point_plane_distance(roi_points)
+        distances = self.__point_plane_distance(roi_points)
 
         height_map = np.zeros((self.h, self.w), dtype=np.float32)
         roi_indices = np.argwhere(self.roi_mask)
@@ -347,6 +347,7 @@ class QrCamera:
                 height_map[y, x] = hgt
 
         object_mask = (height_map > CONFIG.MIN_HEIGHT_THRESHOLD)
+        print(np.sum(object_mask))
         occlusion = np.sum(object_mask) > CONFIG.OCCLUSION_THRESHOLD
         
         return occlusion

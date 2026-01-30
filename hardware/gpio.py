@@ -1,6 +1,7 @@
 import Jetson.GPIO as GPIO
 import time
 import config as CONFIG
+import sys
 
 class Button:
     def __init__(self, button_pin:int=CONFIG.BUTTON_PIN):
