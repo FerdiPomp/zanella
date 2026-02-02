@@ -1,9 +1,9 @@
 import pyrealsense2 as rs
-import pyzed.sl as sl
+#import pyzed.sl as sl
 import numpy as np
 import cv2
 import time
-#from pyzbar.pyzbar import decode
+
 from pylibdmtx.pylibdmtx import decode
 from sklearn.linear_model import RANSACRegressor
 from sklearn.linear_model import LinearRegression
@@ -186,7 +186,7 @@ class ObjCamera:
             self.detect_queue = []
 
 
-        return self.obj_find
+        return self.obj_find, depth, object_mask
 
 #TODO: rimpiazzare questa classe con una normale queue
 class SharedQRState:
@@ -363,21 +363,52 @@ class QrCamera:
 
         img = np.asanyarray(color_frame.get_data())
         x0, y0, x1, y1 = CONFIG.ROI_QR
-        img = img[y0:y1, x0:x1]
+        img_roi = img[y0:y1, x0:x1]
 
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        gray = cv2.cvtColor(img_roi, cv2.COLOR_BGR2GRAY)
         gray = cv2.GaussianBlur(gray, (3, 3), 0)
         #gray = cv2.equalizeHist(gray)
         bw = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 31, 5)
 
         codes = decode(bw, timeout=150, max_count=2)
 
-        if codes and len(codes)==1:
-            return codes[0].data.decode("utf-8",  errors="replace"), occlusion
-        elif codes and len(codes)>1:
-            return None, True
+        cv2.rectangle(
+            img,
+            (x0, y0),
+            (x1, y1),
+            (255, 0, 0),   # blu
+            2
+        )
 
-        return None, occlusion
+        if codes and len(codes)==1:
+            x, y, _, _= codes[0].rect
+
+            cv2.putText(
+                img,
+                codes[0].data.decode("utf-8",  errors="replace"),
+                (x + x0, y + y0 - 10),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (0, 255, 0),
+                2
+            )
+
+            return codes[0].data.decode("utf-8",  errors="replace"), occlusion, img
+        elif codes and len(codes)>1:
+            for code in codes:
+                x, y, _, _= code.rect
+                cv2.putText(
+                    img,
+                    code.data.decode("utf-8",  errors="replace"),
+                    (x + x0, y + y0 - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.8,
+                    (0, 255, 0),
+                    2
+                )
+            return None, True, img
+
+        return None, occlusion, None
 
 
 # TODO: questa può diventare sottoclasse di QrCamera
@@ -525,9 +556,9 @@ class ZEDQrCamera():
 
         img = np.asanyarray(image.get_data())[:,:,:3]
         x0, y0, x1, y1 = CONFIG.ROI_QR
-        img = img[y0:y1, x0:x1]
+        img_roi = img[y0:y1, x0:x1]
 
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        gray = cv2.cvtColor(img_roi, cv2.COLOR_BGR2GRAY)
         gray = cv2.GaussianBlur(gray, (3, 3), 0)
         #gray = cv2.equalizeHist(gray)
         bw = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 31, 5)
@@ -535,8 +566,8 @@ class ZEDQrCamera():
         codes = decode(bw, timeout=200, max_count=2)
 
         if codes and len(codes)==1:
-            return codes[0].data.decode("utf-8",  errors="replace"), occlusion
+            return codes[0].data.decode("utf-8",  errors="replace"), occlusion, img
         elif codes and len(codes)>1:
-            return None, True
+            return None, True, img
 
-        return None, occlusion
+        return None, occlusion, None

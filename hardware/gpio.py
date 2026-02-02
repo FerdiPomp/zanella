@@ -35,3 +35,4 @@ class Light:
 
     def off(self):
         GPIO.output(self.led_pin, GPIO.LOW)
+

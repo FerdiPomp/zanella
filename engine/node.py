@@ -4,7 +4,7 @@ import time
 
 from engine.event import Event, EventXLayer, EVENTS, WORKSPACES, ITEMS
 from hardware.camera import SharedQRState
-from engine.handler import ObjectDetectionHandler, ButtonPressHandler, QrHandler
+from engine.handler import ObjectDetectionHandler, ButtonPressHandler, QrHandler, SimButtonHandler
 from engine.network import USBSender, USBReceiver, MQTTSender
 
 import config as CONFIG
@@ -82,6 +82,12 @@ class ExitNode(BaseNode):
             self.threads.append(threading.Thread(
                     target=ButtonPressHandler,
                     args=(self.stop_event, self.event_queue, self.node_id, button_pin),
+                    daemon=False
+                ))
+        if CONFIG.IS_DEMO:
+            self.threads.append(threading.Thread(
+                    target=SimButtonHandler,
+                    args=(self.stop_event, self.event_queue, self.node_id),
                     daemon=False
                 ))
         

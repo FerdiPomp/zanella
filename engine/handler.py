@@ -1,16 +1,13 @@
 import time
+import cv2
+import numpy as np
+
 from hardware.camera import ObjCamera, QrCamera, SharedQRState, ZEDQrCamera
 from engine.event import Event
-
 import config as CONFIG
-NO_OBJECT = 0
-OBJECT_PRESENT = 1
+#from hardware.gpio import Button, Light
 
-NO_PRESS = 0
-PRESSED = 1
-
-NO_QR = 0
-QR = 1
+import pygame
 
 
 def ObjectDetectionHandler(stop_event, event_queue, node_id, event_type: str, file_bag : str = None, led_pin : int = None):
@@ -25,7 +22,7 @@ def ObjectDetectionHandler(stop_event, event_queue, node_id, event_type: str, fi
     pending_since = None
 
     while not stop_event.is_set():
-        object_present = camera.find_object()
+        object_present, img, obj_mask = camera.find_object()
 
         if object_present is not None:
             now = time.time()
@@ -52,6 +49,23 @@ def ObjectDetectionHandler(stop_event, event_queue, node_id, event_type: str, fi
                 else:
                     pending_since = None
         #time.sleep(0.1)
+        if CONFIG.IS_DEMO:
+            vis = cv2.applyColorMap(cv2.convertScaleAbs(img, alpha=0.03), cv2.COLORMAP_JET)
+            x0, y0, x1, y1 = camera.ROI
+            cv2.rectangle(vis, (x0,y0), (x1,y1), (0,255,0), 2)
+            h, w = img.shape
+            vis_height = np.zeros((h, w, 3), dtype=np.uint8)
+            vis_height[obj_mask] = (0, 0, 255)
+            if state == CONFIG.OBJECT_PRESENT:
+                vis = cv2.addWeighted(vis, 1.0, vis_height, 1.0, 0)
+                led_color = (0,255,0)
+            else:
+                led_color = (0,0,255)
+
+            cv2.rectangle(vis,(0,0),(70,70),led_color,-1)
+            cv2.imshow("Depth", vis)
+            if cv2.waitKey(1) == 27:
+                break
 
 def ButtonPressHandler(stop_event, event_queue, node_id, button_pin:int = None):
     button = Button(button_pin)
@@ -101,7 +115,7 @@ def QrHandler(stop_event, event_queue, node_id, shared_qr_state:SharedQRState, f
     last_qr = None
 
     while not stop_event.is_set():
-        qr, occlusion = camera.read_qr()
+        qr, occlusion, vis = camera.read_qr()
         now = time.time()
 
         # Stato: NO_QR
@@ -150,21 +164,78 @@ def QrHandler(stop_event, event_queue, node_id, shared_qr_state:SharedQRState, f
                             pending_change = None
                     else:
                         pending_change = None
+        
+        if CONFIG.IS_DEMO and vis is not None:
+            cv2.imshow("QR Wall", vis)
+            if cv2.waitKey(1) == 27:
+                break
+
+def SimButtonHandler(stop_event, event_queue, node_id):
+    pygame.init()
+    screen = pygame.display.set_mode((300, 200))
+    
+    pygame.display.set_caption("Button test")
+    pygame.event.set_grab(True) 
+    pygame.mouse.set_visible(True)
 
 
-# def SimButtonHandler(stop_event, event_queue, node_id):
-#     button = SimButton()
-#     state = CONFIG.NO_PRESS
+    class SimButton:
+        def __init__(self, key_code):
+            self.key_code = key_code
 
-#     #TODO: ADD LED UP-DOWN inside this thing
-#     while not stop_event.is_set():
-#         press = False
-#         for line in sys.stdin:
-#         if line.strip().lower() == 'f':
-#             press = True
-#             event_queue.put(Event(source=node_id, type='PRESSED', timestamp=now))
-#             now = time.time()
-#             break
+        def pressed(self):
+            keys = pygame.key.get_pressed()
+            return keys[self.key_code]
+
+    button = SimButton(pygame.K_f)
+
+    state = CONFIG.NO_PRESS
+    pending_since = None
+
+    led_on = False
+    while not stop_event.is_set():
+        for event in pygame.event.get():
+            continue
+            #print(event)
+        press = button.pressed()
+        now = time.time()
+        
+        # ---- Stato: NO_PRESS ----
+        if state == CONFIG.NO_PRESS:
+            if press:
+                if pending_since is None:
+                    pending_since = now
+                    
+                elif now - pending_since >= CONFIG.BUT_MIN_ON_TIME:
+                    state = CONFIG.PRESSED
+                    pending_since = None
+                    led_on = True
+                    event_queue.put(Event(source=node_id, type='PRESSED', timestamp=now))
+            else:
+                pending_since = None
+
+        # ---- Stato: PRESSED ----
+        elif state == CONFIG.PRESSED:
+            if not press:
+                #led_on = False
+                if pending_since is None:
+                    pending_since = now
+                elif now - pending_since >= CONFIG.BUT_MIN_OFF_TIME:
+                    state = CONFIG.NO_PRESS
+                    pending_since = None
+                    led_on = False
+            else:
+                pending_since = None
+
+        
+        color = (0,255,0) if led_on else (250,0,0)
+        pygame.draw.circle(screen, color, (150,100), 50)
+        pygame.display.flip()
+
+        time.sleep(0.05)
+
+    pygame.quit()
+
                 
 
             

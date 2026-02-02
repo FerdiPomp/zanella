@@ -5,6 +5,7 @@
 
 #----------------Camera Parameters------------------#
 IS_ZED = False
+IS_DEMO = True
 
 ROI = (570, 90, 950, 600) # x0, y0, x1, y1
 #ROI for enter obj detection camera
@@ -72,8 +73,8 @@ QR_MIN_CHANGE_TIME = 5
 #----------------End Handler Parameters------------------#
 
 #----------------Node Parameters------------------#
-ONLINE_SENDER = True
-ONLINE_RECIEVER = True
+ONLINE_SENDER = False
+ONLINE_RECIEVER = False
 ONLINE_SENDER_ENV = False
 #----------------End Node Parameters------------------#
 
