@@ -86,7 +86,7 @@ def ButtonPressHandler(stop_event, event_queue, node_id, button_pin:int = None):
                 elif now - pending_since >= CONFIG.BUT_MIN_ON_TIME:
                     state = CONFIG.PRESSED
                     pending_since = None
-                    event_queue.put(Event(source=node_id, type='PRESSED', timestamp=now))
+                    event_queue.put(Event(source=node_id, type='BUTTON_PRESSED', timestamp=now))
                     #return "ENTER"
             else:
                 pending_since = None
@@ -175,7 +175,7 @@ def SimButtonHandler(stop_event, event_queue, node_id):
     screen = pygame.display.set_mode((300, 200))
     
     pygame.display.set_caption("Button test")
-    pygame.event.set_grab(True) 
+    pygame.event.set_grab(False) 
     pygame.mouse.set_visible(True)
 
 
@@ -210,7 +210,7 @@ def SimButtonHandler(stop_event, event_queue, node_id):
                     state = CONFIG.PRESSED
                     pending_since = None
                     led_on = True
-                    event_queue.put(Event(source=node_id, type='PRESSED', timestamp=now))
+                    event_queue.put(Event(source=node_id, type='BUTTON_PRESSED', timestamp=now))
             else:
                 pending_since = None
 

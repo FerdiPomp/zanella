@@ -429,13 +429,13 @@ class ZEDQrCamera():
             init_params.sdk_verbose = 1
 
             # Chat gpt suggested settings for Datamatrix decode
-            zed.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 60)
-            zed.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 20)
-            zed.set_camera_settings(sl.VIDEO_SETTINGS.SHARPNESS, 0)
-            zed.set_camera_settings(sl.VIDEO_SETTINGS.CONTRAST, 4)
+            self.zed.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 60)
+            self.zed.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 20)
+            self.zed.set_camera_settings(sl.VIDEO_SETTINGS.SHARPNESS, 0)
+            self.zed.set_camera_settings(sl.VIDEO_SETTINGS.CONTRAST, 4)
 
             
-        err = zed.open(init_params)
+        err = self.zed.open(init_params)
         if err > sl.ERROR_CODE.SUCCESS:
             print('Failure in opening zed')
             exit(1)
@@ -484,9 +484,9 @@ class ZEDQrCamera():
 
 
     def table_calibration(self, depth_frame = None):
-        if zed.grab(self.runtime_params) == sl.ERROR_CODE.SUCCESS:
+        if self.zed.grab(self.runtime_params) == sl.ERROR_CODE.SUCCESS:
             point_cloud = sl.Mat()
-            zed.retrieve_measure(point_cloud, sl.MEASURE.XYZ)
+            self.zed.retrieve_measure(point_cloud, sl.MEASURE.XYZ)
         else:
             print('Failure in grabbing ZED during table calibration')
             exit(1)
@@ -515,9 +515,9 @@ class ZEDQrCamera():
         return num / den
 
     def find_occlusion(self):
-        if zed.grab(self.runtime_params) == sl.ERROR_CODE.SUCCESS:
+        if self.zed.grab(self.runtime_params) == sl.ERROR_CODE.SUCCESS:
             point_cloud = sl.Mat()
-            zed.retrieve_measure(point_cloud, sl.MEASURE.XYZ)
+            self.zed.retrieve_measure(point_cloud, sl.MEASURE.XYZ)
         else:
             exit(1)
 
@@ -554,9 +554,9 @@ class ZEDQrCamera():
 
     def read_qr(self):
         occlusion = self.find_occlusion()
-        if zed.grab(runtime_params) == sl.ERROR_CODE.SUCCESS:
+        if self.zed.grab(runtime_params) == sl.ERROR_CODE.SUCCESS:
             image = sl.Mat()
-            zed.retrieve_image(image, sl.VIEW.LEFT)
+            self.zed.retrieve_image(image, sl.VIEW.LEFT)
         else:
             exit(1)
 
