@@ -4,6 +4,7 @@ import cv2
 import time
 #from pyzbar.pyzbar import decode
 from pylibdmtx.pylibdmtx import decode
+import pyzed.sl as sl
 
 #from hardware.camera import QrCamera
 
@@ -44,10 +45,10 @@ try:
             zed.retrieve_measure(point_cloud, sl.MEASURE.XYZ)
             zed.retrieve_image(image, sl.VIEW.LEFT)
 
-        depth = np.asanyarray(point_cloud.get_data())[:,:,:3]
+        """ depth = np.asanyarray(point_cloud.get_data())[:,:,:3]
         roi_depth = depth[roi_mask].reshape(-1, 3)
         valid = np.isfinite(roi_depth[:,2])
-        roi_depth = roi_depth[valid]
+        roi_depth = roi_depth[valid] """
 
 
         img = np.asanyarray(image.get_data())[:,:,:3]

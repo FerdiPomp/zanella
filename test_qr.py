@@ -51,6 +51,7 @@ try:
         points = points.reshape(h_d, w_d, 3)
 
         img = np.asanyarray(color_frame.get_data())
+        print(img.shape)
 
         # ================== Disegna ROI ==================
         cv2.rectangle(

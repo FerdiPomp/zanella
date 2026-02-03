@@ -1,5 +1,5 @@
 import pyrealsense2 as rs
-#import pyzed.sl as sl
+import pyzed.sl as sl
 import numpy as np
 import cv2
 import time
@@ -409,7 +409,6 @@ class QrCamera:
             return None, True, img
 
         return None, occlusion, None
-
 
 # TODO: questa può diventare sottoclasse di QrCamera
 class ZEDQrCamera():
