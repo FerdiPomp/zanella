@@ -22,6 +22,11 @@ init_params.camera_resolution = sl.RESOLUTION.HD2K
 init_params.depth_mode = sl.DEPTH_MODE.NEURAL
 init_params.coordinate_units = sl.UNIT.METER
 init_params.sdk_verbose = 1
+# Chat gpt suggested settings for Datamatrix decode
+zed.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 60)
+zed.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 20)
+zed.set_camera_settings(sl.VIDEO_SETTINGS.SHARPNESS, 0)
+zed.set_camera_settings(sl.VIDEO_SETTINGS.CONTRAST, 4)
 
 err = zed.open(init_params)
 if err > sl.ERROR_CODE.SUCCESS:
@@ -51,22 +56,13 @@ try:
         roi_depth = roi_depth[valid] """
 
 
-        img = np.asanyarray(image.get_data())[:,:,:3]
-
-        # ================== Disegna ROI ==================
-        cv2.rectangle(
-            img,
-            (ROI_X, ROI_Y),
-            (ROI_X + ROI_W, ROI_Y + ROI_H),
-            (255, 0, 0),   # blu
-            2
-        )
+        img = np.asanyarray(image.get_data())
 
         # ================== Crop ROI ==================
         roi = img[ROI_Y:ROI_Y + ROI_H, ROI_X:ROI_X + ROI_W]
 
         # ================== Preprocessing ==================
-        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        gray = cv2.cvtColor(roi, cv2.COLOR_RGBA2GRAY)
         gray = cv2.GaussianBlur(gray, (3, 3), 0)
         gray = cv2.equalizeHist(gray)
         bw = cv2.adaptiveThreshold(

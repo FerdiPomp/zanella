@@ -427,6 +427,13 @@ class ZEDQrCamera():
             init_params.depth_mode = sl.DEPTH_MODE.NEURAL
             init_params.coordinate_units = sl.UNIT.METER
             init_params.sdk_verbose = 1
+
+            # Chat gpt suggested settings for Datamatrix decode
+            zed.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 60)
+            zed.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 20)
+            zed.set_camera_settings(sl.VIDEO_SETTINGS.SHARPNESS, 0)
+            zed.set_camera_settings(sl.VIDEO_SETTINGS.CONTRAST, 4)
+
             
         err = zed.open(init_params)
         if err > sl.ERROR_CODE.SUCCESS:
@@ -553,13 +560,14 @@ class ZEDQrCamera():
         else:
             exit(1)
 
-        img = np.asanyarray(image.get_data())[:,:,:3]
+        img = np.asanyarray(image.get_data())
         x0, y0, x1, y1 = CONFIG.ROI_QR
         img_roi = img[y0:y1, x0:x1]
 
-        gray = cv2.cvtColor(img_roi, cv2.COLOR_BGR2GRAY)
+        gray = cv2.cvtColor(img_roi, cv2.COLOR_RGBA2GRAY)
         gray = cv2.GaussianBlur(gray, (3, 3), 0)
-        #gray = cv2.equalizeHist(gray)
+        
+        # TODO: magari fare fallback di questo
         bw = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 31, 5)
 
         codes = decode(bw, timeout=200, max_count=2)
