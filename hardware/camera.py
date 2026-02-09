@@ -427,16 +427,23 @@ class ZEDQrCamera():
             init_params.sdk_verbose = 1
 
             # Chat gpt suggested settings for Datamatrix decode
-            self.zed.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 60)
-            self.zed.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 20)
-            self.zed.set_camera_settings(sl.VIDEO_SETTINGS.SHARPNESS, 0)
-            self.zed.set_camera_settings(sl.VIDEO_SETTINGS.CONTRAST, 4)
+            # self.zed.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 60)
+            # self.zed.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 20)
+            # self.zed.set_camera_settings(sl.VIDEO_SETTINGS.SHARPNESS, 0)
+            # self.zed.set_camera_settings(sl.VIDEO_SETTINGS.CONTRAST, 4)
 
             
         err = self.zed.open(init_params)
         if err > sl.ERROR_CODE.SUCCESS:
             print('Failure in opening zed')
             exit(1)
+
+        if file_bag is None:
+            self.zed.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 60)
+            self.zed.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 20)
+            self.zed.set_camera_settings(sl.VIDEO_SETTINGS.SHARPNESS, 0)
+            self.zed.set_camera_settings(sl.VIDEO_SETTINGS.CONTRAST, 4)
+
 
         self.runtime_params = sl.RuntimeParameters()
         time.sleep(1)
@@ -552,7 +559,7 @@ class ZEDQrCamera():
 
     def read_qr(self):
         occlusion = self.find_occlusion()
-        if self.zed.grab(runtime_params) == sl.ERROR_CODE.SUCCESS:
+        if self.zed.grab(self.runtime_params) == sl.ERROR_CODE.SUCCESS:
             image = sl.Mat()
             self.zed.retrieve_image(image, sl.VIEW.LEFT)
         else:
