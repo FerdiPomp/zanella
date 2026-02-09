@@ -11,6 +11,39 @@ import threading
 
 import config as CONFIG
 
+#TODO: rimpiazzare questa classe con una normale queue
+class SharedQRState:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._qr = None
+        self._timestamp = time.time()
+        self._prev_qr = []
+        self._prev_timestamp = []
+        self._timeout = 100
+
+    def _remove_old(self, now):
+        for i in range(len(self._prev_timestamp)):
+            if now-self._prev_timestamp[i] < self._timeout:
+                break
+            self._prev_timestamp.pop(i)
+            self._prev_qr.pop(i)
+
+    def update(self, qr_value, timestamp):
+        with self._lock:
+            self._prev_qr.append(self._qr)
+            self._prev_timestamp.append(self._timestamp)
+            self._remove_old(timestamp)
+            self._qr = qr_value
+            self._timestamp = timestamp
+            
+    def get(self):
+        with self._lock:
+            return self._qr, self._timestamp
+
+    def get_prev(self):
+        with self.lock:
+            return self._prev_qr, self._prev_timestamp
+
 class ObjCamera:
     def __init__(self, is_enter_node:bool,file_bag : str = None):
         if is_enter_node:
@@ -545,36 +578,3 @@ class ZEDQrCamera():
             return None, True, img
 
         return None, occlusion, None
-
-#TODO: rimpiazzare questa classe con una normale queue
-class SharedQRState:
-    def __init__(self):
-        self._lock = threading.Lock()
-        self._qr = None
-        self._timestamp = time.time()
-        self._prev_qr = []
-        self._prev_timestamp = []
-        self._timeout = 100
-
-    def _remove_old(self, now):
-        for i in range(len(self._prev_timestamp)):
-            if now-self._prev_timestamp[i] < self._timeout:
-                break
-            self._prev_timestamp.pop(i)
-            self._prev_qr.pop(i)
-
-    def update(self, qr_value, timestamp):
-        with self._lock:
-            self._prev_qr.append(self._qr)
-            self._prev_timestamp.append(self._timestamp)
-            self._remove_old(timestamp)
-            self._qr = qr_value
-            self._timestamp = timestamp
-            
-    def get(self):
-        with self._lock:
-            return self._qr, self._timestamp
-
-    def get_prev(self):
-        with self.lock:
-            return self._prev_qr, self._prev_timestamp
