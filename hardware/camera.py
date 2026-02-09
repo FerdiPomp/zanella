@@ -116,7 +116,7 @@ class ObjCamera:
     def __there_is_obj(self):
         obj_list = self.detect_queue
         for i in range(len(obj_list)-1):
-            if not (self.__overlap(obj_list[i], obj_list[i+1]) >0.90):
+            if not (self.__overlap(obj_list[i], obj_list[i+1]) >0.95):
                 return False
         return True
 
@@ -187,39 +187,6 @@ class ObjCamera:
 
 
         return self.obj_find, depth, object_mask
-
-#TODO: rimpiazzare questa classe con una normale queue
-class SharedQRState:
-    def __init__(self):
-        self._lock = threading.Lock()
-        self._qr = None
-        self._timestamp = time.time()
-        self._prev_qr = []
-        self._prev_timestamp = []
-        self._timeout = 100
-
-    def _remove_old(self, now):
-        for i in range(len(self._prev_timestamp)):
-            if now-self._prev_timestamp[i] < self._timeout:
-                break
-            self._prev_timestamp.pop(i)
-            self._prev_qr.pop(i)
-
-    def update(self, qr_value, timestamp):
-        with self._lock:
-            self._prev_qr.append(self._qr)
-            self._prev_timestamp.append(self._timestamp)
-            self._remove_old(timestamp)
-            self._qr = qr_value
-            self._timestamp = timestamp
-            
-    def get(self):
-        with self._lock:
-            return self._qr, self._timestamp
-
-    def get_prev(self):
-        with self.lock:
-            return self._prev_qr, self._prev_timestamp
 
 #TODO: ricontrollare logica occlusioni + vedere se fondere camere in classi e sottoclassi
 class QrCamera:
@@ -578,3 +545,36 @@ class ZEDQrCamera():
             return None, True, img
 
         return None, occlusion, None
+
+#TODO: rimpiazzare questa classe con una normale queue
+class SharedQRState:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._qr = None
+        self._timestamp = time.time()
+        self._prev_qr = []
+        self._prev_timestamp = []
+        self._timeout = 100
+
+    def _remove_old(self, now):
+        for i in range(len(self._prev_timestamp)):
+            if now-self._prev_timestamp[i] < self._timeout:
+                break
+            self._prev_timestamp.pop(i)
+            self._prev_qr.pop(i)
+
+    def update(self, qr_value, timestamp):
+        with self._lock:
+            self._prev_qr.append(self._qr)
+            self._prev_timestamp.append(self._timestamp)
+            self._remove_old(timestamp)
+            self._qr = qr_value
+            self._timestamp = timestamp
+            
+    def get(self):
+        with self._lock:
+            return self._qr, self._timestamp
+
+    def get_prev(self):
+        with self.lock:
+            return self._prev_qr, self._prev_timestamp
