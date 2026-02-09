@@ -22,11 +22,9 @@ class SharedQRState:
         self._timeout = 100
 
     def _remove_old(self, now):
-        for i in range(len(self._prev_timestamp)):
-            if now-self._prev_timestamp[i] < self._timeout:
-                break
-            self._prev_timestamp.pop(i)
-            self._prev_qr.pop(i)
+        while(now-self._prev_timestamp[0] > self._timeout) and (len(self._prev_timestamp)>1):
+            self._prev_timestamp.pop(0)
+            self._prev_qr.pop(0)
 
     def update(self, qr_value, timestamp):
         with self._lock:
