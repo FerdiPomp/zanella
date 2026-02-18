@@ -84,14 +84,14 @@ class Camera:
         self.roi_mask = np.zeros((self.h, self.w), dtype=bool)
         self.roi_mask[y0:y1, x0:x1] = True
 
-        points = self.__depth_to_points(depth_frame)
+        points = self._depth_to_points(depth_frame)
         points = points.reshape(self.h, self.w, 3)
 
         roi_points = points[self.roi_mask]
         roi_points = roi_points[np.isfinite(roi_points[:,2])]
 
         #TODO: check for not None output
-        self.plane = self.__estimate_plane(roi_points)
+        self.plane = self._estimate_plane(roi_points)
         print("Piano stimato:", self.plane)
     
     def _estimate_plane(self, points):
