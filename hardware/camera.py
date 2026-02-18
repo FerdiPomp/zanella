@@ -352,7 +352,9 @@ class QrCamera(Camera):
         return None, occlusion or not_aruco, None
 
     def read_aruco(self, img):
-        corners, ids, rejected = cv2.aruco.detectMarkers(img, cv2.aruco.Dictionary_get(cv2.aruco.DICT_ARUCO_ORIGINAL), parameters=cv2.aruco.DetectorParameters_create())
+        detector = cv2.aruco.ArucoDetector(cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_ARUCO_ORIGINAL), cv2.aruco.DetectorParameters())
+        corners, ids, rejected= detector.detectMarkers(image)
+        #corners, ids, rejected = cv2.aruco.detectMarkers(img, cv2.aruco.Dictionary_get(cv2.aruco.DICT_ARUCO_ORIGINAL), parameters=cv2.aruco.DetectorParameters_create())
 
         if ids is not None:
             return 0 in ids
