@@ -94,7 +94,7 @@ class Camera:
         self.plane = self.__estimate_plane(roi_points)
         print("Piano stimato:", self.plane)
     
-    def __estimate_plane(self, points):
+    def _estimate_plane(self, points):
         assert points.ndim == 2 and points.shape[1] == 3
 
         X = points[:, :2]   # x, y
@@ -117,12 +117,12 @@ class Camera:
 
         return np.array([a_xy[0], a_xy[1], -1.0, c_z], dtype=np.float64)
 
-    def __depth_to_points(self, depth_frame):
+    def _depth_to_points(self, depth_frame):
         points = self.pc.calculate(depth_frame)
         verts = np.asanyarray(points.get_vertices()).view(np.float32)
         return verts.reshape(-1, 3)
 
-    def __point_plane_distance(self, points, plane = None):
+    def _point_plane_distance(self, points, plane = None):
             if plane is None:
                 plane = self.plane
             a, b, c, d = plane
@@ -187,7 +187,7 @@ class ObjCamera(Camera):
 
         depth = np.asanyarray(depth_frame.get_data())
         
-        points = self.__depth_to_points(depth_frame).reshape(self.h, self.w, 3)
+        points = self._depth_to_points(depth_frame).reshape(self.h, self.w, 3)
 
         roi_points = points[self.roi_mask].reshape(-1, 3)
         valid = np.isfinite(roi_points[:,2])
@@ -201,7 +201,7 @@ class ObjCamera(Camera):
         #     if std_height < CONFIG.THRESH_STD:
         #         self.plane = new_plane
 
-        distances = self.__point_plane_distance(roi_points)
+        distances = self._point_plane_distance(roi_points)
 
         height_map = np.zeros((self.h, self.w), dtype=np.float32)
         roi_indices = np.argwhere(self.roi_mask)
@@ -256,7 +256,7 @@ class QrCamera(Camera):
 
         depth = np.asanyarray(depth_frame.get_data())
         
-        points = self.__depth_to_points(depth_frame).reshape(self.h, self.w, 3)
+        points = self._depth_to_points(depth_frame).reshape(self.h, self.w, 3)
 
         roi_points = points[self.roi_mask].reshape(-1, 3)
         valid = np.isfinite(roi_points[:,2])
@@ -271,7 +271,7 @@ class QrCamera(Camera):
         #         self.plane = new_plane
 
 
-        distances = self.__point_plane_distance(roi_points)
+        distances = self._point_plane_distance(roi_points)
 
         height_map = np.zeros((self.h, self.w), dtype=np.float32)
         roi_indices = np.argwhere(self.roi_mask)
