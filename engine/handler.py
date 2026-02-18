@@ -1,6 +1,7 @@
 import time
 import cv2
 import numpy as np
+import os
 
 from hardware.camera import ObjCamera, QrCamera, SharedQRState, ZEDQrCamera
 from engine.event import Event
@@ -21,6 +22,9 @@ def ObjectDetectionHandler(stop_event, event_queue, node_id, event_type: str, fi
     state = CONFIG.NO_OBJECT
     pending_since = None
 
+    video_seq = []
+    record = False
+
     while not stop_event.is_set():
         object_present, img, obj_mask = camera.find_object()
 
@@ -29,6 +33,7 @@ def ObjectDetectionHandler(stop_event, event_queue, node_id, event_type: str, fi
             # Stato: NO_OBJECT
             if state == CONFIG.NO_OBJECT:
                 if object_present:
+                    record = True
                     state = CONFIG.OBJECT_PRESENT
                     if CONFIG.THERE_IS_LED:
                         light.on()
@@ -42,6 +47,7 @@ def ObjectDetectionHandler(stop_event, event_queue, node_id, event_type: str, fi
                         pending_since = now
                     elif now - pending_since >= CONFIG.OBJ_MIN_OFF_TIME:
                         state = CONFIG.NO_OBJECT
+                        record = False
                         if CONFIG.THERE_IS_LED:
                             light.off()
                         pending_since = None
@@ -66,6 +72,13 @@ def ObjectDetectionHandler(stop_event, event_queue, node_id, event_type: str, fi
             cv2.imshow("Depth", vis)
             if cv2.waitKey(1) == 27:
                 break
+
+        if CONFIG.DEBUGGING:
+            if record and img is not None:
+                video_seq.append(img)
+            if not record and len(video_seq)>0:
+                save_img(video_seq, '_obj_camera', 'recorded')
+                video_seq = []
 
 def ButtonPressHandler(stop_event, event_queue, node_id, button_pin:int = None):
     button = Button(button_pin)
@@ -114,6 +127,8 @@ def QrHandler(stop_event, event_queue, node_id, shared_qr_state:SharedQRState, f
     pending_change = None
     last_qr = None
 
+    video_seq = []
+    record = False
     while not stop_event.is_set():
         qr, occlusion, vis = camera.read_qr()
         now = time.time()
@@ -124,10 +139,12 @@ def QrHandler(stop_event, event_queue, node_id, shared_qr_state:SharedQRState, f
                 if last_qr is not None:
                     if not last_qr == qr:
                         pending_since = None
+                        record = False
 
                 if pending_since is None:
                     pending_since = now
                     last_qr = qr
+                    record = True
                 elif now - pending_since >= CONFIG.QR_MIN_ON_TIME:
                     state = CONFIG.QR
                     pending_since = None
@@ -147,6 +164,7 @@ def QrHandler(stop_event, event_queue, node_id, shared_qr_state:SharedQRState, f
                     elif now - pending_since >= CONFIG.QR_MIN_OFF_TIME:
                         state = CONFIG.NO_QR
                         pending_since = None
+                        record = False
                         shared_qr_state.update(None, now)
                         event_queue.put(Event(source=node_id, type='QR_REMOVED', timestamp=now, qr=last_qr))
                         last_qr = None
@@ -162,6 +180,9 @@ def QrHandler(stop_event, event_queue, node_id, shared_qr_state:SharedQRState, f
                             event_queue.put(Event(source=node_id, type='QR_APPEND', timestamp=now, qr = qr))
                             last_qr = qr
                             pending_change = None
+                            if len(video_seq)>0:
+                                save_img(video_seq, '_qr_camera', 'recorded')
+                                video_seq = []
                     else:
                         pending_change = None
         
@@ -170,6 +191,13 @@ def QrHandler(stop_event, event_queue, node_id, shared_qr_state:SharedQRState, f
             if cv2.waitKey(1) == 27:
                 break
 
+        if CONFIG.DEBUGGING:
+            if record and vis is not None:
+                video_seq.append(vis)
+            if not record and len(video_seq)>0:
+                save_img(video_seq, '_qr_camera', 'recorded')
+                video_seq = []
+            
 def SimButtonHandler(stop_event, event_queue, node_id):
     pygame.init()
     screen = pygame.display.set_mode((300, 200))
@@ -236,6 +264,13 @@ def SimButtonHandler(stop_event, event_queue, node_id):
 
     pygame.quit()
 
-                
+def save_img(img_seq:list, file_name:str, dir_name:str):
+    if not os.path.exist(dir_name):
+        os.mkdir(dir_name)
+    
+    full_name = str(time.time_ns()) + file_name
+    video = np.array(img_seq)
+    np.save(video, os.path.join(dir_name,))
+
 
             

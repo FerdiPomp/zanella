@@ -11,7 +11,6 @@ import threading
 
 import config as CONFIG
 
-#TODO: rimpiazzare questa classe con una normale queue
 class SharedQRState:
     def __init__(self):
         self._lock = threading.Lock()
@@ -42,12 +41,11 @@ class SharedQRState:
         with self.lock:
             return self._prev_qr, self._prev_timestamp
 
-class ObjCamera:
-    def __init__(self, is_enter_node:bool,file_bag : str = None):
-        if is_enter_node:
-            self.ROI = CONFIG.ROI_A
-        else:
-            self.ROI = CONFIG.ROI_B
+# TODO: riorganizza meglio classi e sottoclassi.
+
+class Camera:
+    def __init__(self, rgb: bool, file_bag : str = None):
+        self.ROI = [0,0,-1,-1]
 
         self.pipeline = None
         self.pipeline = rs.pipeline()
@@ -57,26 +55,19 @@ class ObjCamera:
             config.enable_device_from_file(file_bag,  repeat_playback=False)
         else:
             config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
+            if rgb:
+                config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
 
         profile = self.pipeline.start(config)
+        if rgb:
+            align = rs.align(rs.stream.color)
         self.depth_scale = profile.get_device().first_depth_sensor().get_depth_scale()
 
         self.pc = rs.pointcloud()
-        time.sleep(1)
-        print("First table calibration")
         self.plane = None
         self.roi_mask = None
         self.h = None
         self.w = None
-        self.table_calibration()
-        self.detect_queue = []
-        self.obj_find = False
-
-        self.expected_hu_set = np.load("expected_shape/expected_hu.npy")
-
-    def __del__(self):
-        if self.pipeline is not None:
-            self.pipeline.stop()
 
     def table_calibration(self, depth_frame=None):
         if depth_frame is None:
@@ -102,8 +93,7 @@ class ObjCamera:
         #TODO: check for not None output
         self.plane = self.__estimate_plane(roi_points)
         print("Piano stimato:", self.plane)
-
-    #TODO: magari trovare un modo più sofisticato di fare sta cosa...
+    
     def __estimate_plane(self, points):
         assert points.ndim == 2 and points.shape[1] == 3
 
@@ -133,12 +123,32 @@ class ObjCamera:
         return verts.reshape(-1, 3)
 
     def __point_plane_distance(self, points, plane = None):
-        if plane is None:
-            plane = self.plane
-        a, b, c, d = plane
-        num = a*points[:,0] + b*points[:,1] + c*points[:,2] + d
-        den = np.sqrt(a*a + b*b + c*c)
-        return num / den
+            if plane is None:
+                plane = self.plane
+            a, b, c, d = plane
+            num = a*points[:,0] + b*points[:,1] + c*points[:,2] + d
+            den = np.sqrt(a*a + b*b + c*c)
+            return num / den
+
+class ObjCamera(Camera):
+    def __init__(self, is_enter_node:bool,file_bag : str = None):
+        super().__init__(False, file_bag)
+
+        if is_enter_node:
+            self.ROI = CONFIG.ROI_A
+        else:
+            self.ROI = CONFIG.ROI_B
+
+        self.detect_queue = []
+        self.obj_find = False
+
+        self.expected_hu_set = np.load("expected_shape/expected_hu.npy")
+
+        self.table_calibration()
+        
+    def __del__(self):
+        if self.pipeline is not None:
+            self.pipeline.stop()
 
     def __overlap(slef, mask1, mask2):
         inter = np.logical_and(mask1, mask2)
@@ -210,7 +220,10 @@ class ObjCamera:
             if len(self.detect_queue)>CONFIG.MAX_LEN:
                 self.detect_queue.pop(0)
                 if not self.obj_find:
-                    self.obj_find = self.__there_is_obj() & shape_ok
+                    there_is_obj = self.__there_is_obj()
+                    self.obj_find = there_is_obj & shape_ok
+                    if CONFIG.DEBUGGING and there_is_obj and not shape_ok:
+                        save_img(depth, '_not_right_shape', 'debug_shape')
         else:
             if self.obj_find:
                 self.obj_find = False   
@@ -219,98 +232,21 @@ class ObjCamera:
 
         return self.obj_find, depth, object_mask
 
-#TODO: ricontrollare logica occlusioni + vedere se fondere camere in classi e sottoclassi
-class QrCamera:
+#TODO: ricontrollare logica occlusioni 
+class QrCamera(Camera):
     def __init__(self, shared_qr_state:SharedQRState, file_bag : str = None):
+
+        super().__init__(True, file_bag)
+        self.ROI = CONFIG.ROI_QR
+
         self.shared_qr_state = shared_qr_state
         self._last_qr = None
-        self.pipeline = None
-        self.pipeline = rs.pipeline()
-        config = rs.config()
 
-        if file_bag is not None:
-            config.enable_device_from_file(file_bag, repeat_playback=False)
-        else:
-            config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
-            config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
-            
-        profile = self.pipeline.start(config)
-        align = rs.align(rs.stream.color)
-        self.depth_scale = profile.get_device().first_depth_sensor().get_depth_scale()
-        self.pc = rs.pointcloud()
-        time.sleep(1)
-        print("First table calibration")
-        self.plane = None
-        self.roi_mask = None
-        self.h = None
-        self.w = None
         self.table_calibration()
 
     def __del__(self):
         if self.pipeline is not None:
             self.pipeline.stop()
-
-    def __depth_to_points(self, depth_frame):
-        points = self.pc.calculate(depth_frame)
-        verts = np.asanyarray(points.get_vertices()).view(np.float32)
-        return verts.reshape(-1, 3)
-
-    def __estimate_plane(self, points):
-        assert points.ndim == 2 and points.shape[1] == 3
-
-        X = points[:, :2]   # x, y
-        y = points[:, 2]    # z
-
-        ransac = RANSACRegressor(
-            estimator=LinearRegression(),
-            residual_threshold=CONFIG.PLANE_THRESHOLD,
-            min_samples=5000,
-            max_trials=100
-        )
-        try:
-            ransac.fit(X, y)
-
-            # Piano: z = ax + by + c
-            a_xy = ransac.estimator_.coef_
-            c_z = ransac.estimator_.intercept_
-        except:
-            return None
-
-        return np.array([a_xy[0], a_xy[1], -1.0, c_z], dtype=np.float64)
-
-
-    def table_calibration(self, depth_frame = None):
-        if depth_frame is None:
-            frames = self.pipeline.wait_for_frames()
-            depth_frame = frames.get_depth_frame()
-            if not depth_frame:
-                print("No depth frame")
-                return None
-
-        depth = np.asanyarray(depth_frame.get_data())
-        self.h, self.w = depth.shape
-        
-        x0, y0, x1, y1 = CONFIG.ROI_QR
-
-        self.roi_mask = np.zeros((self.h, self.w), dtype=bool)
-        self.roi_mask[y0:y1, x0:x1] = True
-
-        points = self.__depth_to_points(depth_frame)
-        points = points.reshape(self.h, self.w, 3)
-
-        roi_points = points[self.roi_mask]
-        roi_points = roi_points[np.isfinite(roi_points[:,2])]
-
-        self.plane = self.__estimate_plane(roi_points)
-        print("Piano stimato:", self.plane)
-
-    def __point_plane_distance(self, points, plane = None):
-        if plane is None:
-            plane = self.plane
-        a, b, c, d = self.plane
-        num = a*points[:,0] + b*points[:,1] + c*points[:,2] + d
-        den = np.sqrt(a*a + b*b + c*c)
-        return num / den
 
     def find_occlusion(self):
         frames = self.pipeline.wait_for_frames()
@@ -357,13 +293,20 @@ class QrCamera:
 
         color_frame = frames.get_color_frame()
         if not color_frame:
-            return None, occlusion
+            return None, occlusion, None
 
         img = np.asanyarray(color_frame.get_data())
         x0, y0, x1, y1 = CONFIG.ROI_QR
         img_roi = img[y0:y1, x0:x1]
 
         gray = cv2.cvtColor(img_roi, cv2.COLOR_BGR2GRAY)
+
+        # if in aruco mode, if a 0 aruco is not find, then i have occlusion
+        not_aruco = True
+        if CONFIG.ARUCO_MODE:
+            if self.read_aruco(gray):
+                not_aruco = False
+
         gray = cv2.GaussianBlur(gray, (3, 3), 0)
         #gray = cv2.equalizeHist(gray)
         bw = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 31, 5)
@@ -390,7 +333,7 @@ class QrCamera:
                 (0, 255, 0),
                 2
             )
-
+            # NOTE: fuori da aruco mode questo è più sicuro se ritorni occlusion e non false
             return codes[0].data.decode("utf-8",  errors="replace"), occlusion, img
         elif codes and len(codes)>1:
             for code in codes:
@@ -406,9 +349,18 @@ class QrCamera:
                 )
             return None, True, img
 
-        return None, occlusion, None
+        return None, occlusion or not_aruco, None
 
-# TODO: questa può diventare sottoclasse di QrCamera
+    def read_aruco(self, img):
+        corners, ids, rejected = cv2.aruco.detectMarkers(img, cv2.aruco.Dictionary_get(cv2.aruco.DICT_ARUCO_ORIGINAL), parameters=cv2.aruco.DetectorParameters_create())
+
+        if ids is not None:
+            return 0 in ids
+        else:
+            return False
+
+
+
 class ZEDQrCamera():
     def __init__(self, shared_qr_state:SharedQRState, file_bag : str = None):
         self.shared_qr_state = shared_qr_state
@@ -425,14 +377,7 @@ class ZEDQrCamera():
             init_params.depth_mode = sl.DEPTH_MODE.NEURAL
             init_params.coordinate_units = sl.UNIT.METER
             init_params.sdk_verbose = 1
-
-            # Chat gpt suggested settings for Datamatrix decode
-            # self.zed.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 60)
-            # self.zed.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 20)
-            # self.zed.set_camera_settings(sl.VIDEO_SETTINGS.SHARPNESS, 0)
-            # self.zed.set_camera_settings(sl.VIDEO_SETTINGS.CONTRAST, 4)
-
-            
+   
         err = self.zed.open(init_params)
         if err > sl.ERROR_CODE.SUCCESS:
             print('Failure in opening zed')
@@ -458,7 +403,6 @@ class ZEDQrCamera():
         if self.zed is not None:
             self.zed.close()
             
-
     def __depth_to_points(self, depth_frame):
         points = self.pc.calculate(depth_frame)
         verts = np.asanyarray(points.get_vertices()).view(np.float32)
@@ -486,7 +430,6 @@ class ZEDQrCamera():
             return None
 
         return np.array([a_xy[0], a_xy[1], -1.0, c_z], dtype=np.float64)
-
 
     def table_calibration(self, depth_frame = None):
         if self.zed.grab(self.runtime_params) == sl.ERROR_CODE.SUCCESS:
@@ -570,6 +513,12 @@ class ZEDQrCamera():
         img_roi = img[y0:y1, x0:x1]
 
         gray = cv2.cvtColor(img_roi, cv2.COLOR_RGBA2GRAY)
+
+        not_aruco = True
+        if CONFIG.ARUCO_MODE:
+            if self.read_aruco(gray):
+                not_aruco = False
+
         gray = cv2.GaussianBlur(gray, (3, 3), 0)
         
         # TODO: magari fare fallback di questo
@@ -582,4 +531,19 @@ class ZEDQrCamera():
         elif codes and len(codes)>1:
             return None, True, img
 
-        return None, occlusion, None
+        return None, occlusion or not_aruco, None
+
+    def read_aruco(self, img):
+        corners, ids, rejected = cv2.aruco.detectMarkers(img, cv2.aruco.Dictionary_get(cv2.aruco.DICT_ARUCO_ORIGINAL), parameters=cv2.aruco.DetectorParameters_create())
+
+        if ids is not None:
+            return 0 in ids
+        else:
+            return False
+
+def save_img(img, file_name:str, dir_name:str):
+    if not os.path.exist(dir_name):
+        os.mkdir(dir_name)
+    
+    full_name = str(time.time_ns()) + file_name
+    np.save(img, os.path.join(dir_name,))

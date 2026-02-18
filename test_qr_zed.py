@@ -8,6 +8,7 @@ import pyzed.sl as sl
 
 #from hardware.camera import QrCamera
 
+USE_BAG = True
 
 def depth_to_points(depth_frame):
     points = pc.calculate(depth_frame)
@@ -18,26 +19,26 @@ def depth_to_points(depth_frame):
 zed = sl.Camera()
 
 init_params = sl.InitParameters()
-init_params.camera_resolution = sl.RESOLUTION.HD2K
-init_params.depth_mode = sl.DEPTH_MODE.NEURAL
-init_params.coordinate_units = sl.UNIT.METER
-init_params.sdk_verbose = 1
-# Chat gpt suggested settings for Datamatrix decode
-zed.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 60)
-zed.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 20)
-zed.set_camera_settings(sl.VIDEO_SETTINGS.SHARPNESS, 0)
-zed.set_camera_settings(sl.VIDEO_SETTINGS.CONTRAST, 4)
+
+if USE_BAG:
+    init_params.set_from_svo_file('./test_qr_zed.svo2')
+else:
+    init_params.camera_resolution = sl.RESOLUTION.HD2K
+    init_params.depth_mode = sl.DEPTH_MODE.NEURAL
+    init_params.coordinate_units = sl.UNIT.METER
+    init_params.sdk_verbose = 1
 
 err = zed.open(init_params)
 if err > sl.ERROR_CODE.SUCCESS:
     exit(1)
 
 
+
 # ================== ROI (MODIFICA QUI) ==================
 # Esempio: area centrale
-ROI_X = 500
-ROI_Y = 300
-ROI_W = 400
+ROI_X = 513
+ROI_Y = 386
+ROI_W = 190
 ROI_H = 300
 
 try:
@@ -98,6 +99,14 @@ try:
                 #     3
                 # )
 
+                depth = np.asanyarray(point_cloud.get_data())[:,:,:3]
+                h, w, _ = depth.shape
+                roi_mask = np.zeros((h, w), dtype=bool)
+                roi_mask[xg:yg-h, xg + w:yg] = True
+                roi_points = depth[roi_mask]
+                roi_points = roi_points[np.isfinite(roi_points[:,2])]
+                print(np.mean(roi_points[:,2]))
+
                 cv2.putText(
                     img,
                     data,
@@ -116,5 +125,4 @@ try:
             break
 
 finally:
-    pipeline.stop()
     cv2.destroyAllWindows()
