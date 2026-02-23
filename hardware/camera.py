@@ -353,7 +353,7 @@ class QrCamera(Camera):
 
     def read_aruco(self, img):
         detector = cv2.aruco.ArucoDetector(cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_ARUCO_ORIGINAL), cv2.aruco.DetectorParameters())
-        corners, ids, rejected= detector.detectMarkers(image)
+        corners, ids, rejected= detector.detectMarkers(img)
         #corners, ids, rejected = cv2.aruco.detectMarkers(img, cv2.aruco.Dictionary_get(cv2.aruco.DICT_ARUCO_ORIGINAL), parameters=cv2.aruco.DetectorParameters_create())
 
         if ids is not None:
@@ -536,7 +536,9 @@ class ZEDQrCamera():
         return None, occlusion or not_aruco, None
 
     def read_aruco(self, img):
-        corners, ids, rejected = cv2.aruco.detectMarkers(img, cv2.aruco.Dictionary_get(cv2.aruco.DICT_ARUCO_ORIGINAL), parameters=cv2.aruco.DetectorParameters_create())
+        detector = cv2.aruco.ArucoDetector(cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_ARUCO_ORIGINAL), cv2.aruco.DetectorParameters())
+        corners, ids, rejected= detector.detectMarkers(img)
+        #corners, ids, rejected = cv2.aruco.detectMarkers(img, cv2.aruco.Dictionary_get(cv2.aruco.DICT_ARUCO_ORIGINAL), parameters=cv2.aruco.DetectorParameters_create())
 
         if ids is not None:
             return 0 in ids
@@ -544,8 +546,8 @@ class ZEDQrCamera():
             return False
 
 def save_img(img, file_name:str, dir_name:str):
-    if not os.path.exist(dir_name):
+    if not os.path.exists(dir_name):
         os.mkdir(dir_name)
     
     full_name = str(time.time_ns()) + file_name
-    np.save(img, os.path.join(dir_name,))
+    np.save(os.path.join(dir_name,full_name), img)

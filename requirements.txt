@@ -1,0 +1,8 @@
+numpy
+cv2
+pyrealsense2
+scikit-learn
+pygame
+Flask
+paho-mqtt
+requests

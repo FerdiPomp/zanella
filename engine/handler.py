@@ -193,7 +193,7 @@ def QrHandler(stop_event, event_queue, node_id, shared_qr_state:SharedQRState, f
 
         if CONFIG.DEBUGGING:
             if record and vis is not None:
-                video_seq.append(vis)
+                video_seq.append(vis.copy())
             if not record and len(video_seq)>0:
                 save_img(video_seq, '_qr_camera', 'recorded')
                 video_seq = []
@@ -265,12 +265,12 @@ def SimButtonHandler(stop_event, event_queue, node_id):
     pygame.quit()
 
 def save_img(img_seq:list, file_name:str, dir_name:str):
-    if not os.path.exist(dir_name):
+    if not os.path.exists(dir_name):
         os.mkdir(dir_name)
     
     full_name = str(time.time_ns()) + file_name
     video = np.array(img_seq)
-    np.save(video, os.path.join(dir_name,))
+    np.save(os.path.join(dir_name,full_name), video)
 
 
             
