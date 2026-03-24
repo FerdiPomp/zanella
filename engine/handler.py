@@ -6,18 +6,18 @@ import os
 from hardware.camera import ObjCamera, QrCamera, SharedQRState, ZEDQrCamera
 from engine.event import Event
 import config as CONFIG
-#from hardware.gpio import Button, Light
+from hardware.gpio import Button, Light
+import gpiod
+from gpiod.line import Direction, Value
 
 import pygame
 
 
-def ObjectDetectionHandler(stop_event, event_queue, node_id, event_type: str, file_bag : str = None, led_pin : int = None):
+def ObjectDetectionHandler(stop_event, event_queue, node_id, event_type: str, led_queue = None,file_bag : str = None):
     assert event_type in ['ENTER_DETECT', 'EXIT_DETECT']
 
     is_enter_node = (node_id == 'A')
     camera = ObjCamera(is_enter_node, file_bag)
-    if CONFIG.THERE_IS_LED:
-        light = Light(led_pin)
     
     state = CONFIG.NO_OBJECT
     pending_since = None
@@ -35,8 +35,8 @@ def ObjectDetectionHandler(stop_event, event_queue, node_id, event_type: str, fi
                 if object_present:
                     record = True
                     state = CONFIG.OBJECT_PRESENT
-                    if CONFIG.THERE_IS_LED:
-                        light.on()
+                    if led_queue is not None:
+                        led_queue.put("on")
                     event_queue.put(Event(source=node_id, type=event_type, timestamp=now))
                     #return "ENTER"
 
@@ -48,8 +48,8 @@ def ObjectDetectionHandler(stop_event, event_queue, node_id, event_type: str, fi
                     elif now - pending_since >= CONFIG.OBJ_MIN_OFF_TIME:
                         state = CONFIG.NO_OBJECT
                         record = False
-                        if CONFIG.THERE_IS_LED:
-                            light.off()
+                        if led_queue is not None:
+                            led_queue.put("off")
                         pending_since = None
                         #return "EXIT"
                 else:
@@ -80,8 +80,8 @@ def ObjectDetectionHandler(stop_event, event_queue, node_id, event_type: str, fi
                 save_img(video_seq, '_obj_camera', 'recorded')
                 video_seq = []
 
-def ButtonPressHandler(stop_event, event_queue, node_id, button_pin:int = None):
-    button = Button(button_pin)
+def ButtonPressHandler(stop_event, event_queue, node_id, led_queue = None):
+    button = Button(CONFIG.BUTTON_PIN)
 
     state = CONFIG.NO_PRESS
     pending_since = None
@@ -100,7 +100,8 @@ def ButtonPressHandler(stop_event, event_queue, node_id, button_pin:int = None):
                     state = CONFIG.PRESSED
                     pending_since = None
                     event_queue.put(Event(source=node_id, type='BUTTON_PRESSED', timestamp=now))
-                    #return "ENTER"
+                    if led_queue is not None:
+                        led_queue.put("on")
             else:
                 pending_since = None
 
@@ -112,7 +113,8 @@ def ButtonPressHandler(stop_event, event_queue, node_id, button_pin:int = None):
                 elif now - pending_since >= CONFIG.BUT_MIN_OFF_TIME:
                     state = NO_PRESS
                     pending_since = None
-                    #return "EXIT"
+                    if led_queue is not None:
+                        led_queue.put("off")
             else:
                 pending_since = None
 
@@ -263,6 +265,20 @@ def SimButtonHandler(stop_event, event_queue, node_id):
         time.sleep(0.05)
 
     pygame.quit()
+
+def LightHandler(stop_event, led_queue):
+    with gpiod.request_lines(
+        "/dev/gpiochip0",
+        consumer="Led_line",
+        config={CONFIG.LED_PIN: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE)}
+    ) as request:
+        while not stop_event.is_set():
+            cmd = queue.get()
+            if cmd == "on":
+                request.set_value(CONFIG.LED_PIN, Value.ACTIVE)
+            elif cmd == "off":
+                request.set_value(CONFIG.LED_PIN, Value.INACTIVE)
+        request.set_value(CONFIG.LED_PIN, Value.INACTIVE)
 
 def save_img(img_seq:list, file_name:str, dir_name:str):
     if not os.path.exists(dir_name):

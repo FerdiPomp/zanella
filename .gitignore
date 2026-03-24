@@ -1,2 +1,9 @@
 zenv/
 test_qr_zed.svo2:Zone.Identifier
+expected_shape_old/
+hu_shape_calculator.py
+record_png.py
+record_video.py
+vis_debug_shape.py
+vis_recorded.py
+data/

@@ -4,7 +4,7 @@ import time
 
 from engine.event import Event, EventXLayer, EVENTS, WORKSPACES, ITEMS
 from hardware.camera import SharedQRState
-from engine.handler import ObjectDetectionHandler, ButtonPressHandler, QrHandler, SimButtonHandler
+from engine.handler import ObjectDetectionHandler, ButtonPressHandler, QrHandler, SimButtonHandler, LightHandler
 from engine.network import USBSender, USBReceiver, MQTTSender
 
 import config as CONFIG
@@ -30,6 +30,7 @@ class EnterNode(BaseNode):
     def __init__(self, node_id):
         super().__init__(node_id)
         self.sender = USBSender()
+        self.led_queue = Queue()
     def _network_loop(self):
         if CONFIG.ONLINE_SENDER:
             while True:
@@ -47,6 +48,13 @@ class EnterNode(BaseNode):
                 args=(self.stop_event, self.event_queue, self.node_id, 'ENTER_DETECT', file_bag, led_pin),
                 daemon=False
             ))
+
+        if CONFIG.THERE_IS_LED:
+            self.threads.append(threading.Thread(
+                    target=LightHandler,
+                    args=(self.stop_event, self.led_queue),
+                    daemon=False
+                ))
 
         threading.Thread(
             target=self._network_loop,
@@ -77,11 +85,18 @@ class ExitNode(BaseNode):
                 args=(self.stop_event, self.event_queue, self.node_id, 'EXIT_DETECT', file_bag, led_pin),
                 daemon=False
             ))
-        
+
+        if CONFIG.THERE_IS_LED:
+            self.threads.append(threading.Thread(
+                    target=LightHandler,
+                    args=(self.stop_event, self.led_queue),
+                    daemon=False
+                ))
+
         if CONFIG.THERE_IS_BUTTON:
             self.threads.append(threading.Thread(
                     target=ButtonPressHandler,
-                    args=(self.stop_event, self.event_queue, self.node_id, button_pin),
+                    args=(self.stop_event, self.event_queue, self.node_id, self.led_queue),
                     daemon=False
                 ))
         if CONFIG.IS_DEMO:
