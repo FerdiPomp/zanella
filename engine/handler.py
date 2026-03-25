@@ -13,7 +13,7 @@ from gpiod.line import Direction, Value
 import pygame
 
 
-def ObjectDetectionHandler(stop_event, event_queue, node_id, event_type: str, led_queue = None,file_bag : str = None):
+def ObjectDetectionHandler(stop_event, event_queue, node_id, event_type: str, led_queue = None, file_bag : str = None):
     assert event_type in ['ENTER_DETECT', 'EXIT_DETECT']
 
     is_enter_node = (node_id == 'A')
@@ -81,7 +81,7 @@ def ObjectDetectionHandler(stop_event, event_queue, node_id, event_type: str, le
                 video_seq = []
 
 def ButtonPressHandler(stop_event, event_queue, node_id, led_queue = None):
-    button = Button(CONFIG.BUTTON_PIN)
+    button = Button()
 
     state = CONFIG.NO_PRESS
     pending_since = None
@@ -273,7 +273,7 @@ def LightHandler(stop_event, led_queue):
         config={CONFIG.LED_PIN: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE)}
     ) as request:
         while not stop_event.is_set():
-            cmd = queue.get()
+            cmd = led_queue.get()
             if cmd == "on":
                 request.set_value(CONFIG.LED_PIN, Value.ACTIVE)
             elif cmd == "off":
@@ -287,6 +287,4 @@ def save_img(img_seq:list, file_name:str, dir_name:str):
     full_name = str(time.time_ns()) + file_name
     video = np.array(img_seq)
     np.save(os.path.join(dir_name,full_name), video)
-
-
-            
+       

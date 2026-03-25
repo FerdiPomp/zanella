@@ -3,6 +3,7 @@ import pyzed.sl as sl
 import numpy as np
 import cv2
 import time
+import os
 
 from pylibdmtx.pylibdmtx import decode
 from sklearn.linear_model import RANSACRegressor
@@ -54,9 +55,9 @@ class Camera:
         if file_bag is not None:
             config.enable_device_from_file(file_bag,  repeat_playback=False)
         else:
-            config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
+            config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 5)
             if rgb:
-                config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
+                config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 5)
 
         profile = self.pipeline.start(config)
         if rgb:
@@ -70,6 +71,11 @@ class Camera:
         self.w = None
 
     def table_calibration(self, depth_frame=None):
+        # Warm up before table calibration
+        for i in range(10):
+            frames = self.pipeline.wait_for_frames()
+            depth_frame = frames.get_depth_frame()
+
         if depth_frame is None:
             frames = self.pipeline.wait_for_frames()
             depth_frame = frames.get_depth_frame()
@@ -89,6 +95,7 @@ class Camera:
 
         roi_points = points[self.roi_mask]
         roi_points = roi_points[np.isfinite(roi_points[:,2])]
+        roi_points = roi_points[roi_points[:,2]>0.3]
 
         #TODO: check for not None output
         self.plane = self._estimate_plane(roi_points)
@@ -132,7 +139,7 @@ class Camera:
 
 class ObjCamera(Camera):
     def __init__(self, is_enter_node:bool,file_bag : str = None):
-        super().__init__(False, file_bag)
+        super().__init__(CONFIG.DEBUGGING, file_bag)
 
         if is_enter_node:
             self.ROI = CONFIG.ROI_A
@@ -185,6 +192,9 @@ class ObjCamera(Camera):
         if not depth_frame:
             return None
 
+        if CONFIG.DEBUGGING:
+            color_frame = frames.get_color_frame()
+
         depth = np.asanyarray(depth_frame.get_data())
         
         points = self._depth_to_points(depth_frame).reshape(self.h, self.w, 3)
@@ -224,6 +234,9 @@ class ObjCamera(Camera):
                     self.obj_find = there_is_obj & shape_ok
                     if CONFIG.DEBUGGING and there_is_obj and not shape_ok:
                         save_img(depth, '_not_right_shape', 'debug_shape')
+                        if color_frame:
+                            color = np.asanyarray(color_frame.get_data())
+                            save_img(color, '_shape', 'debug_shape_img')
         else:
             if self.obj_find:
                 self.obj_find = False   

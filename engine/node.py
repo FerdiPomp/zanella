@@ -31,6 +31,7 @@ class EnterNode(BaseNode):
         super().__init__(node_id)
         self.sender = USBSender()
         self.led_queue = Queue()
+
     def _network_loop(self):
         if CONFIG.ONLINE_SENDER:
             while True:
@@ -42,10 +43,10 @@ class EnterNode(BaseNode):
                 print(event)
 
 
-    def start(self, file_bag:str=None, led_pin : int = None):
+    def start(self, file_bag:str=None):
         self.threads.append(threading.Thread(
                 target=ObjectDetectionHandler,
-                args=(self.stop_event, self.event_queue, self.node_id, 'ENTER_DETECT', file_bag, led_pin),
+                args=(self.stop_event, self.event_queue, self.node_id, 'ENTER_DETECT', self.led_queue, file_bag),
                 daemon=False
             ))
 
@@ -68,7 +69,8 @@ class ExitNode(BaseNode):
     def __init__(self, node_id):
         super().__init__(node_id)
         self.sender = USBSender()
-    
+        self.led_queue = Queue()
+
     def _network_loop(self):
         if CONFIG.ONLINE_SENDER:
             while True:
@@ -79,10 +81,10 @@ class ExitNode(BaseNode):
                 event = self.event_queue.get()
                 print(event)
 
-    def start(self, file_bag:str=None, led_pin : int = None, button_pin:int = None):
+    def start(self, file_bag:str=None):
         self.threads.append(threading.Thread(
                 target=ObjectDetectionHandler,
-                args=(self.stop_event, self.event_queue, self.node_id, 'EXIT_DETECT', file_bag, led_pin),
+                args=(self.stop_event, self.event_queue, self.node_id, 'EXIT_DETECT', self.led_queue, file_bag),
                 daemon=False
             ))
 
