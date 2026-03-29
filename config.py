@@ -9,13 +9,13 @@ IS_DEMO = False
 ARUCO_MODE = False
 DEBUGGING = False
 
-ROI = (570, 90, 950, 600) # x0, y0, x1, y1
+ROI = (390, 30, 930, 420) # x0, y0, x1, y1
 #ROI for enter obj detection camera
-ROI_A = (410, 236, 820, 600) # x0, y0, x1, y1
+ROI_A = (360, 0, 950, 395) # x0, y0, x1, y1
 #ROI for exit obj detection camera
-ROI_B = (400, 200, 850, 600) # x0, y0, x1, y1
+ROI_B = (390, 30, 930, 420) # x0, y0, x1, y1
 #ROI for env camera
-ROI_QR = (560, 250, 890, 500) # x0, y0, x1, y1
+ROI_QR = (370,290,440,415) # x0, y0, x1, y1
 
 ROI_QR_ZED = (513, 386, 696, 616)
 
@@ -46,8 +46,8 @@ OCCLUSION_THRESHOLD = 1000
 
 #----------------GPIO Parameters------------------#
 #TODO: RE-NUMERATE PIN 
-BUTTON_PIN = 16
-LED_PIN = 12
+BUTTON_PIN = 85
+LED_PIN = 106
 #----------------End GPIO Parameters------------------#
 
 #----------------Handler Parameters------------------#
@@ -83,6 +83,8 @@ ONLINE_SENDER_ENV = False
 #----------------End Node Parameters------------------#
 
 #----------------Network Parameters------------------#
-SERVER_URL = "192.168.1.103"
+SERVER_URL = "192.168.0.233"
 SERVER_PORT = 9000
+BROKER_IP = "ws://mqtt.192.168.0.60.nip.io"
+MQTT_PORT = 443
 #----------------End Network Parameters------------------#

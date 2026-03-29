@@ -279,6 +279,7 @@ def LightHandler(stop_event, led_queue):
             elif cmd == "off":
                 request.set_value(CONFIG.LED_PIN, Value.INACTIVE)
         request.set_value(CONFIG.LED_PIN, Value.INACTIVE)
+        request.release()
 
 def save_img(img_seq:list, file_name:str, dir_name:str):
     if not os.path.exists(dir_name):

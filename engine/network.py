@@ -81,10 +81,12 @@ class USBSender:
             self._connect()
 
 class MQTTSender:
-    def __init__(self, broker_ip, topic):
+    def __init__(self, broker_psw, topic):
         self.topic = topic
         self.client = mqtt.Client()
-        self.client.connect(broker_ip, 1883)
+        client.username_pw_set("univrcameras", broker_psw)
+        client.tls_set(ca_certs="certificate.crt")
+        self.client.connect(broker_ip, CONFIG.MQTT_PORT)
         self.client.loop_start()
 
     def send(self, event):

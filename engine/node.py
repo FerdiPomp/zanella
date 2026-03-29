@@ -29,7 +29,7 @@ class BaseNode:
 class EnterNode(BaseNode):
     def __init__(self, node_id):
         super().__init__(node_id)
-        self.sender = USBSender()
+        self.sender = HTTPSender()
         self.led_queue = Queue()
 
     def _network_loop(self):
@@ -41,7 +41,6 @@ class EnterNode(BaseNode):
             while True:
                 event = self.event_queue.get()
                 print(event)
-
 
     def start(self, file_bag:str=None):
         self.threads.append(threading.Thread(
@@ -68,7 +67,7 @@ class EnterNode(BaseNode):
 class ExitNode(BaseNode):
     def __init__(self, node_id):
         super().__init__(node_id)
-        self.sender = USBSender()
+        self.sender = HTTPSender()
         self.led_queue = Queue()
 
     def _network_loop(self):
@@ -117,11 +116,11 @@ class ExitNode(BaseNode):
             t.start()
 
 class EnvNode(BaseNode):
-    def __init__(self, node_id, workspace:str, broker_ip, topic ):
+    def __init__(self, node_id, workspace:str, broker_psw, topic):
         super().__init__(node_id)
         if CONFIG.ONLINE_SENDER_ENV:
-            self.sender = MQTTSender(broker_ip, topic)
-        self.receiver = USBReceiver()
+            self.sender = MQTTSender(broker_psw, topic)
+        self.receiver = HTTPReceiver()
         self.shared_qr_state = SharedQRState()
         self.workspace = workspace
 
