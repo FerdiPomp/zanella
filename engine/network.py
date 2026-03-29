@@ -83,11 +83,12 @@ class USBSender:
 class MQTTSender:
     def __init__(self, broker_psw, topic):
         self.topic = topic
-        self.client = mqtt.Client()
+        self.client = mqtt.Client(transport="websockets", protocol=mqtt.MQTTv311, callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
         self.client.username_pw_set("univrcameras", broker_psw)
         self.client.tls_set(ca_certs="certificate.crt")
         self.client.connect(CONFIG.BROKER_IP, CONFIG.MQTT_PORT)
         self.client.loop_start()
+        time.sleep(0.5)
 
     def send(self, event):
         #TODO: validate json before sending
