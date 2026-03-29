@@ -5,7 +5,7 @@ import time
 from engine.event import Event, EventXLayer, EVENTS, WORKSPACES, ITEMS
 from hardware.camera import SharedQRState
 from engine.handler import ObjectDetectionHandler, ButtonPressHandler, QrHandler, SimButtonHandler, LightHandler
-from engine.network import USBSender, USBReceiver, MQTTSender
+from engine.network import HTTPSender, HTTPReceiver, MQTTSender
 
 import config as CONFIG
 
