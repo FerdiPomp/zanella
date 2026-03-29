@@ -84,8 +84,8 @@ class MQTTSender:
     def __init__(self, broker_psw, topic):
         self.topic = topic
         self.client = mqtt.Client()
-        client.username_pw_set("univrcameras", broker_psw)
-        client.tls_set(ca_certs="certificate.crt")
+        self.client.username_pw_set("univrcameras", broker_psw)
+        self.client.tls_set(ca_certs="certificate.crt")
         self.client.connect(CONFIG.BROKER_IP, CONFIG.MQTT_PORT)
         self.client.loop_start()
 

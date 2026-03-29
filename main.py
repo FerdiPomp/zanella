@@ -12,7 +12,7 @@ parser = argparse.ArgumentParser(description="Esempio con argparse")
 parser.add_argument("--node_id", type=str, help="Jetson ID, as the jetson node role")
 parser.add_argument("--workspace", type=str, default = None, help="Workspace name as str")
 parser.add_argument("--mqtt_psw", default = None, help="password")
-parser.add_argument("--topic", default = "workplace10/Tracevision", help="topic workplace_id/Tracevision")
+parser.add_argument("--topic", default = "workplace40/Tracevision", help="topic workplace_id/Tracevision")
 parser.add_argument("--file_bag", type=str, default = None, help="Bag file path for realsense data")
 
 args = parser.parse_args()
