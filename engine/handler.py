@@ -2,6 +2,7 @@ import time
 import cv2
 import numpy as np
 import os
+import queue
 
 from hardware.camera import ObjCamera, QrCamera, SharedQRState, ZEDQrCamera
 from engine.event import Event
@@ -86,7 +87,6 @@ def ButtonPressHandler(stop_event, event_queue, node_id, led_queue = None):
     state = CONFIG.NO_PRESS
     pending_since = None
 
-    #TODO: ADD LED UP-DOWN inside this thing
     while not stop_event.is_set():
         press = button.pressed()
         now = time.time()
@@ -273,13 +273,17 @@ def LightHandler(stop_event, led_queue):
         config={CONFIG.LED_PIN: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE)}
     ) as request:
         while not stop_event.is_set():
-            cmd = led_queue.get()
+            
+            try:
+                cmd = led_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+
             if cmd == "on":
                 request.set_value(CONFIG.LED_PIN, Value.ACTIVE)
             elif cmd == "off":
                 request.set_value(CONFIG.LED_PIN, Value.INACTIVE)
         request.set_value(CONFIG.LED_PIN, Value.INACTIVE)
-        request.release()
 
 def save_img(img_seq:list, file_name:str, dir_name:str):
     if not os.path.exists(dir_name):

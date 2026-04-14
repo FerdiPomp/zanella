@@ -10,7 +10,7 @@ class Event:
 
 @dataclass
 class EventXLayer:
-    workspace: dict
+    workplace: dict
     event_id: dict
     mes_data: str
     good_items:int

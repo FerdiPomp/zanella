@@ -10,13 +10,13 @@ from sklearn.linear_model import LinearRegression
 # =====================
 
 # ROI del tavolo (da regolare)
-# ROI = (400, 200, 840, 580)#(150, 90, 440, 400)  # x0, y0, x1, y1
-ROI = (360, 0, 950, 395)
+ROI = 367, 38, 908, 420#(150, 90, 440, 400)  # x0, y0, x1, y1
+#ROI = (360, 0, 950, 395)
 
 # RANSAC
 PLANE_THRESH = 0.005  
 
-SHAPE_THRESHOLD = 1.5
+SHAPE_THRESHOLD = 3
 # MIN_POINTS_PER_SLICE = 1
 # OVERLAP_THRESHOLD = 0.01
 
@@ -37,7 +37,7 @@ pipeline = rs.pipeline()
 config = rs.config()
 
 if USE_BAG:
-    config.enable_device_from_file("./tavolo_1.bag",  repeat_playback=True)
+    config.enable_device_from_file("./data/tavolo_2.bag",  repeat_playback=True)
 else:
     config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
 
@@ -109,7 +109,7 @@ def shape_validation(obj_mask, expected_hu_set):
         hu = (np.sign(hu) * np.log10(np.abs(hu) + 1e-12)).flatten()
         distances = np.linalg.norm(expected_hu_set - hu, axis=1)
         min_distance = np.min(distances)
-        #print(min_distance)
+        print(min_distance)
         shape_ok_raw = min_distance < SHAPE_THRESHOLD
 
     return shape_ok_raw
@@ -144,7 +144,7 @@ roi_points = points[roi_mask]
 roi_points = roi_points[np.isfinite(roi_points[:,2])]
 
 
-plane = estimate_plane(roi_points)
+plane = [-0.01194095, -0.01854437, -1.0, 0.66844052]#estimate_plane(roi_points)
 print("Piano stimato:", plane)
 
 # =====================
@@ -169,14 +169,14 @@ while True:
     valid = np.isfinite(roi_points[:,2])
     roi_points = roi_points[valid]
 
-    new_plane = estimate_plane(roi_points)
-    if new_plane is not None:
-        new_distances = point_plane_distance(roi_points, new_plane)
-        std_height = np.std(new_distances)
-        print(std_height)
-        if std_height < THRESH_STD:
-            plane = new_plane
-            print("Piano ricalibrato:", plane)
+    # new_plane = estimate_plane(roi_points)
+    # if new_plane is not None:
+    #     new_distances = point_plane_distance(roi_points, new_plane)
+    #     std_height = np.std(new_distances)
+    #     #print(std_height)
+    #     if std_height < THRESH_STD:
+    #         plane = new_plane
+    #         print("Piano ricalibrato:", plane)
 
     distances = point_plane_distance(roi_points, plane)
     
@@ -211,9 +211,8 @@ while True:
     # =====================
     # VISUALIZZAZIONE
     # =====================
-
     vis = cv2.applyColorMap(
-        cv2.convertScaleAbs(depth, alpha=0.03),
+        cv2.convertScaleAbs(depth, alpha=0.1),
         cv2.COLORMAP_JET
     )
 

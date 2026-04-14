@@ -50,16 +50,16 @@ class Camera:
 
         self.pipeline = None
         self.pipeline = rs.pipeline()
-        config = rs.config()
+        self.config = rs.config()
 
         if file_bag is not None:
-            config.enable_device_from_file(file_bag,  repeat_playback=False)
+            self.config.enable_device_from_file(file_bag,  repeat_playback=False)
         else:
-            config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 5)
+            self.config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 5)
             if rgb:
-                config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 5)
+                self.config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 5)
 
-        profile = self.pipeline.start(config)
+        profile = self.pipeline.start(self.config)
         if rgb:
             align = rs.align(rs.stream.color)
         self.depth_scale = profile.get_device().first_depth_sensor().get_depth_scale()
@@ -150,7 +150,7 @@ class ObjCamera(Camera):
         self.obj_find = False
 
         self.expected_hu_set = np.load("expected_shape/expected_hu.npy")
-
+        time.sleep(3)
         self.table_calibration()
         
     def __del__(self):
@@ -164,7 +164,7 @@ class ObjCamera(Camera):
     def __there_is_obj(self):
         obj_list = self.detect_queue
         for i in range(len(obj_list)-1):
-            if not (self.__overlap(obj_list[i], obj_list[i+1]) >0.95):
+            if not (self.__overlap(obj_list[i], obj_list[i+1]) >0.70): #TODO: not hardcode this value
                 return False
         return True
 
@@ -187,7 +187,19 @@ class ObjCamera(Camera):
         return False
 
     def find_object(self):
-        frames = self.pipeline.wait_for_frames()
+        try:
+            frames = self.pipeline.wait_for_frames()
+        except RuntimeError as e:
+            print(f"Frame timeout, restart pipeline: {e}")
+            try:
+                self.pipeline.stop()
+            except:
+                pass
+            time.sleep(1)
+            self.pipeline.start(self.config)
+            time.sleep(2)
+            frames = self.pipeline.wait_for_frames()
+            
         depth_frame = frames.get_depth_frame()
         if not depth_frame:
             return None
@@ -232,11 +244,11 @@ class ObjCamera(Camera):
                 if not self.obj_find:
                     there_is_obj = self.__there_is_obj()
                     self.obj_find = there_is_obj & shape_ok
-                    if CONFIG.DEBUGGING and there_is_obj and not shape_ok:
-                        save_img(depth, '_not_right_shape', 'debug_shape')
-                        if color_frame:
-                            color = np.asanyarray(color_frame.get_data())
-                            save_img(color, '_shape', 'debug_shape_img')
+                if CONFIG.DEBUGGING:
+                    save_img(depth, '_not_right_shape', 'debug_shape')
+                    if color_frame:
+                        color = np.asanyarray(color_frame.get_data())
+                        save_img(color, '_shape', 'debug_shape_img')
         else:
             if self.obj_find:
                 self.obj_find = False   
@@ -529,7 +541,7 @@ class ZEDQrCamera():
 
         gray = cv2.cvtColor(img_roi, cv2.COLOR_RGBA2GRAY)
 
-        not_aruco = True
+        not_aruco = False
         if CONFIG.ARUCO_MODE:
             if self.read_aruco(gray):
                 not_aruco = False

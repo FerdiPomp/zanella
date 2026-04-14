@@ -92,6 +92,7 @@ class MQTTSender:
 
     def send(self, event):
         #TODO: validate json before sending
+        print(event)
         payload = json.dumps(event.__dict__)
         self.client.publish(
             self.topic,
@@ -112,6 +113,7 @@ class HTTPSender:
         Invia l'evento al server. 
         Retry automatico se il server non risponde.
         """
+        print(f"Sending:{event}")
         payload = {
             "source": event.source,
             "type": event.type,

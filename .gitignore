@@ -7,3 +7,5 @@ record_video.py
 vis_debug_shape.py
 vis_recorded.py
 data/
+certificate.crt
+run.sh

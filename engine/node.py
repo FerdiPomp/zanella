@@ -140,7 +140,7 @@ class EnvNode(BaseNode):
         else:
             qr = event.qr
 
-        new_event = EventXLayer(workspace = WORKSPACES[self.workspace],
+        new_event = EventXLayer(workplace = WORKSPACES[self.workspace],
                                 event_id = EVENTS[event.type],
                                 mes_data = qr, 
                                 good_items= ITEMS[event.type][0], #puo essere molto meno complicato di cosi, basta mettere if .. in [..]
