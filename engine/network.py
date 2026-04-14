@@ -1,89 +1,40 @@
-import requests
-import queue
-import socket
 import json
 import threading
 import time
-import paho.mqtt.client as mqtt
-from flask import Flask, request, jsonify
-
-from engine.event import Event
 
 import config as CONFIG
+from engine.event import Event
+from engine.runtime_utils import print_log
 
-class USBReceiver:
-    def __init__(self, host=CONFIG.SERVER_URL, port=CONFIG.SERVER_PORT):
-        self.host = host
-        self.port = port
 
-    def start(self, event_queue):
-        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server.bind((self.host, self.port))
-        server.listen(5)
+def _event_from_dict(data):
+    return Event(
+        source=data["source"],
+        type=data["type"],
+        timestamp=data["timestamp"],
+        payload=data.get("payload"),
+    )
 
-        def client_handler(conn):
-            with conn:
-                buffer = ""
-                while True:
-                    data = conn.recv(1024)
-                    if not data:
-                        break
 
-                    buffer += data.decode()
-                    while "\n" in buffer:
-                        line, buffer = buffer.split("\n", 1)
+def _event_to_payload(event: Event):
+    return {
+        "source": event.source,
+        "type": event.type,
+        "timestamp": event.timestamp,
+        "payload": event.payload,
+    }
 
-                        data = json.loads(line)
-                        event = Event(
-                            source=data["source"],
-                            type=data["type"],
-                            timestamp=data["timestamp"],
-                            payload=data.get("payload")
-                        )
-                        event_queue.put(event)
-
-        def accept_loop():
-            while True:
-                conn, _ = server.accept()
-                threading.Thread(
-                    target=client_handler,
-                    args=(conn,),
-                    daemon=True
-                ).start()
-
-        threading.Thread(target=accept_loop, daemon=True).start()
-
-class USBSender:
-    def __init__(self, server_ip=CONFIG.SERVER_URL, port=CONFIG.SERVER_PORT):
-        self.server_ip = server_ip
-        self.port = port
-        self.socket = None
-
-    def _connect(self):
-        while True:
-            try:
-                self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self.socket.connect((self.server_ip, self.port))
-                return
-            except Exception:
-                time.sleep(1)
-
-    def send(self, event):
-        if self.socket is None:
-            self._connect()
-
-        try:
-            msg = json.dumps(event.__dict__) + "\n"
-            self.socket.sendall(msg.encode())
-        except Exception:
-            self.socket.close()
-            self.socket = None
-            self._connect()
 
 class MQTTSender:
     def __init__(self, broker_psw, topic):
+        import paho.mqtt.client as mqtt
+
         self.topic = topic
-        self.client = mqtt.Client(transport="websockets", protocol=mqtt.MQTTv311, callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
+        self.client = mqtt.Client(
+            transport="websockets",
+            protocol=mqtt.MQTTv311,
+            callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+        )
         self.client.username_pw_set("univrcameras", broker_psw)
         self.client.tls_set(ca_certs="certificate.crt")
         self.client.connect(CONFIG.BROKER_IP, CONFIG.MQTT_PORT)
@@ -91,17 +42,21 @@ class MQTTSender:
         time.sleep(0.5)
 
     def send(self, event):
-        #TODO: validate json before sending
+        # TODO: validate json before sending
         print(event)
         payload = json.dumps(event.__dict__)
         self.client.publish(
             self.topic,
             payload=payload,
-            qos=1
+            qos=1,
         )
+
 
 class HTTPSender:
     def __init__(self, server_ip=CONFIG.SERVER_URL, port=CONFIG.SERVER_PORT, endpoint="/event", timeout=1):
+        import requests
+
+        self.requests = requests
         self.server_ip = server_ip
         self.port = port
         self.endpoint = endpoint
@@ -110,53 +65,50 @@ class HTTPSender:
 
     def send(self, event: Event):
         """
-        Invia l'evento al server. 
+        Invia l'evento al server.
         Retry automatico se il server non risponde.
         """
         print(f"Sending:{event}")
-        payload = {
-            "source": event.source,
-            "type": event.type,
-            "timestamp": event.timestamp,
-            "payload": event.payload
-        }
+        payload = _event_to_payload(event)
 
         while True:
             try:
-                r = requests.post(self.url, json=payload, timeout=self.timeout)
-                if r.status_code == 200:
+                response = self.requests.post(self.url, json=payload, timeout=self.timeout)
+                if response.status_code == 200:
                     return
-            except requests.RequestException:
+            except self.requests.RequestException:
                 pass  # ignore e retry
             time.sleep(1)
-        
+
+
 class HTTPReceiver:
     def __init__(self, host=CONFIG.SERVER_URL, port=CONFIG.SERVER_PORT):
+        from flask import Flask, jsonify, request
+
+        self.Flask = Flask
+        self.jsonify = jsonify
+        self.request = request
         self.host = host
         self.port = port
-        self.app = Flask(__name__)
+        self.app = self.Flask(__name__)
+
+    def _register_routes(self, event_queue):
+        @self.app.route("/event", methods=["POST"])
+        def receive_event():
+            data = self.request.json
+            try:
+                event_queue.put(_event_from_dict(data))
+                return self.jsonify({"status": "ok"})
+            except Exception as e:
+                return self.jsonify({"status": "error", "msg": str(e)}), 400
 
     def start(self, event_queue):
         """
         Avvia il server Flask in un thread separato
         e riempie la queue con Event.
         """
-        @self.app.route("/event", methods=["POST"])
-        def receive_event():
-            data = request.json
-            try:
-                event = Event(
-                    source=data["source"],
-                    type=data["type"],
-                    timestamp=data["timestamp"],
-                    payload=data.get("payload")
-                )
-                event_queue.put(event)
-                return jsonify({"status": "ok"})
-            except Exception as e:
-                return jsonify({"status": "error", "msg": str(e)}), 400
-
+        self._register_routes(event_queue)
         threading.Thread(
             target=lambda: self.app.run(host=self.host, port=self.port),
-            daemon=True
+            daemon=True,
         ).start()

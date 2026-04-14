@@ -1,16 +1,74 @@
-import pyrealsense2 as rs
-import pyzed.sl as sl
 import numpy as np
 import cv2
-import time
-import os
-
-from pylibdmtx.pylibdmtx import decode
-from sklearn.linear_model import RANSACRegressor
-from sklearn.linear_model import LinearRegression
 import threading
+import time
+
+from sklearn.linear_model import LinearRegression, RANSACRegressor
 
 import config as CONFIG
+from engine.runtime_utils import print_log, save_jpg_artifact, save_numpy_artifact
+
+
+def _estimate_plane(points):
+    assert points.ndim == 2 and points.shape[1] == 3
+
+    x_coordinates = points[:, :2]
+    z_coordinates = points[:, 2]
+
+    ransac = RANSACRegressor(
+        estimator=LinearRegression(),
+        residual_threshold=CONFIG.PLANE_THRESHOLD,
+        min_samples=5000,
+        max_trials=100,
+    )
+    try:
+        ransac.fit(x_coordinates, z_coordinates)
+        a_xy = ransac.estimator_.coef_
+        c_z = ransac.estimator_.intercept_
+    except Exception:
+        return None
+
+    return np.array([a_xy[0], a_xy[1], -1.0, c_z], dtype=np.float64)
+
+
+def _point_plane_distance(points, plane):
+    a, b, c, d = plane
+    num = a * points[:, 0] + b * points[:, 1] + c * points[:, 2] + d
+    den = np.sqrt(a * a + b * b + c * c)
+    return num / den
+
+
+def _build_height_map(points, roi_mask, image_shape, plane):
+    roi_points = points[roi_mask].reshape(-1, 3)
+    valid = np.isfinite(roi_points[:, 2])
+    roi_points = roi_points[valid]
+
+    distances = _point_plane_distance(roi_points, plane)
+    height_map = np.zeros(image_shape, dtype=np.float32)
+    roi_indices = np.argwhere(roi_mask)
+
+    for (y, x), height in zip(roi_indices, distances):
+        if height > height_map[y, x]:
+            height_map[y, x] = height
+
+    return height_map
+
+
+def _build_aruco_detector():
+    dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_ARUCO_ORIGINAL)
+    parameters = cv2.aruco.DetectorParameters()
+    return cv2.aruco.ArucoDetector(dictionary, parameters)
+
+
+def _decode_text(code):
+    return code.data.decode("utf-8", errors="replace")
+
+
+def _save_debug_artifact(data, file_name: str, dir_name: str):
+    if isinstance(data, np.ndarray) and data.ndim == 3:
+        return save_jpg_artifact(data, dir_name, file_name)
+    return save_numpy_artifact(data, dir_name, file_name)
+
 
 class SharedQRState:
     def __init__(self):
@@ -22,7 +80,7 @@ class SharedQRState:
         self._timeout = 100
 
     def _remove_old(self, now):
-        while(now-self._prev_timestamp[0] > self._timeout) and (len(self._prev_timestamp)>1):
+        while (now - self._prev_timestamp[0] > self._timeout) and (len(self._prev_timestamp) > 1):
             self._prev_timestamp.pop(0)
             self._prev_qr.pop(0)
 
@@ -33,7 +91,7 @@ class SharedQRState:
             self._remove_old(timestamp)
             self._qr = qr_value
             self._timestamp = timestamp
-            
+
     def get(self):
         with self._lock:
             return self._qr, self._timestamp
@@ -42,537 +100,345 @@ class SharedQRState:
         with self.lock:
             return self._prev_qr, self._prev_timestamp
 
-# TODO: riorganizza meglio classi e sottoclassi.
 
-class Camera:
-    def __init__(self, rgb: bool, file_bag : str = None):
-        self.ROI = [0,0,-1,-1]
+class RealSenseCamera:
+    def __init__(self, rgb: bool, file_bag: str = None):
+        import pyrealsense2 as rs
 
-        self.pipeline = None
-        self.pipeline = rs.pipeline()
-        self.config = rs.config()
+        self.rs = rs
+        self.ROI = [0, 0, -1, -1]
+        self.pipeline = self.rs.pipeline()
+        self.config = self.rs.config()
 
         if file_bag is not None:
-            self.config.enable_device_from_file(file_bag,  repeat_playback=False)
+            self.config.enable_device_from_file(file_bag, repeat_playback=False)
         else:
-            self.config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 5)
+            self.config.enable_stream(self.rs.stream.depth, 1280, 720, self.rs.format.z16, 5)
             if rgb:
-                self.config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 5)
+                self.config.enable_stream(self.rs.stream.color, 1280, 720, self.rs.format.bgr8, 5)
 
         profile = self.pipeline.start(self.config)
-        if rgb:
-            align = rs.align(rs.stream.color)
         self.depth_scale = profile.get_device().first_depth_sensor().get_depth_scale()
-
-        self.pc = rs.pointcloud()
+        self.pc = self.rs.pointcloud()
         self.plane = None
         self.roi_mask = None
         self.h = None
         self.w = None
 
-    def table_calibration(self, depth_frame=None):
-        # Warm up before table calibration
-        for i in range(10):
-            frames = self.pipeline.wait_for_frames()
-            depth_frame = frames.get_depth_frame()
+    def __del__(self):
+        if getattr(self, "pipeline", None) is not None:
+            self.pipeline.stop()
 
-        if depth_frame is None:
-            frames = self.pipeline.wait_for_frames()
-            depth_frame = frames.get_depth_frame()
-            if not depth_frame:
-                print("No depth frame")
-                return None
+    def _wait_for_frames(self):
+        return self.pipeline.wait_for_frames()
 
-        depth = np.asanyarray(depth_frame.get_data())
-        self.h, self.w = depth.shape
+    def _warmup_depth_frame(self):
+        depth_frame = None
+        for _ in range(10):
+            frames = self._wait_for_frames()
+            depth_frame = frames.get_depth_frame()
+        return depth_frame
+
+    def _build_roi_mask(self):
         x0, y0, x1, y1 = self.ROI
-
         self.roi_mask = np.zeros((self.h, self.w), dtype=bool)
         self.roi_mask[y0:y1, x0:x1] = True
-
-        points = self._depth_to_points(depth_frame)
-        points = points.reshape(self.h, self.w, 3)
-
-        roi_points = points[self.roi_mask]
-        roi_points = roi_points[np.isfinite(roi_points[:,2])]
-        roi_points = roi_points[roi_points[:,2]>0.3]
-
-        #TODO: check for not None output
-        self.plane = self._estimate_plane(roi_points)
-        print("Piano stimato:", self.plane)
-    
-    def _estimate_plane(self, points):
-        assert points.ndim == 2 and points.shape[1] == 3
-
-        X = points[:, :2]   # x, y
-        y = points[:, 2]    # z
-
-        ransac = RANSACRegressor(
-            estimator=LinearRegression(),
-            residual_threshold=CONFIG.PLANE_THRESHOLD,
-            min_samples=5000,
-            max_trials=100
-        )
-        try:
-            ransac.fit(X, y)
-
-            # Piano: z = ax + by + c
-            a_xy = ransac.estimator_.coef_
-            c_z = ransac.estimator_.intercept_
-        except:
-            return None
-
-        return np.array([a_xy[0], a_xy[1], -1.0, c_z], dtype=np.float64)
 
     def _depth_to_points(self, depth_frame):
         points = self.pc.calculate(depth_frame)
         verts = np.asanyarray(points.get_vertices()).view(np.float32)
         return verts.reshape(-1, 3)
 
-    def _point_plane_distance(self, points, plane = None):
-            if plane is None:
-                plane = self.plane
-            a, b, c, d = plane
-            num = a*points[:,0] + b*points[:,1] + c*points[:,2] + d
-            den = np.sqrt(a*a + b*b + c*c)
-            return num / den
+    def _calibrate_plane_from_depth_frame(self, depth_frame):
+        depth = np.asanyarray(depth_frame.get_data())
+        self.h, self.w = depth.shape
+        self._build_roi_mask()
 
-class ObjCamera(Camera):
-    def __init__(self, is_enter_node:bool,file_bag : str = None):
+        points = self._depth_to_points(depth_frame).reshape(self.h, self.w, 3)
+        roi_points = points[self.roi_mask]
+        roi_points = roi_points[np.isfinite(roi_points[:, 2])]
+        roi_points = roi_points[roi_points[:, 2] > 0.3]
+        self.plane = _estimate_plane(roi_points)
+        print_log(f"Piano stimato: {self.plane}")
+
+    def table_calibration(self):
+        depth_frame = self._warmup_depth_frame()
+
+        if depth_frame is None:
+            frames = self._wait_for_frames()
+            depth_frame = frames.get_depth_frame()
+            if not depth_frame:
+                print_log("No depth frame")
+                return None
+
+        self._calibrate_plane_from_depth_frame(depth_frame)
+
+    def _build_height_map_from_depth_frame(self, depth_frame):
+        points = self._depth_to_points(depth_frame).reshape(self.h, self.w, 3)
+        return _build_height_map(points, self.roi_mask, (self.h, self.w), self.plane)
+
+
+class ObjCamera(RealSenseCamera):
+    def __init__(self, is_enter_node: bool, file_bag: str = None):
         super().__init__(CONFIG.DEBUGGING, file_bag)
-
-        if is_enter_node:
-            self.ROI = CONFIG.ROI_A
-        else:
-            self.ROI = CONFIG.ROI_B
-
+        self.ROI = CONFIG.ROI_A if is_enter_node else CONFIG.ROI_B
         self.detect_queue = []
         self.obj_find = False
-
         self.expected_hu_set = np.load("expected_shape/expected_hu.npy")
         time.sleep(3)
         self.table_calibration()
-        
-    def __del__(self):
-        if self.pipeline is not None:
-            self.pipeline.stop()
 
-    def __overlap(slef, mask1, mask2):
+    def __overlap(self, mask1, mask2):
         inter = np.logical_and(mask1, mask2)
         return np.sum(inter) / max(np.sum(mask1), 1)
 
     def __there_is_obj(self):
-        obj_list = self.detect_queue
-        for i in range(len(obj_list)-1):
-            if not (self.__overlap(obj_list[i], obj_list[i+1]) >0.70): #TODO: not hardcode this value
+        for index in range(len(self.detect_queue) - 1):
+            if not (self.__overlap(self.detect_queue[index], self.detect_queue[index + 1]) > 0.70):
                 return False
         return True
 
     def __shape_validation(self, obj_mask):
         num_labels, labels = cv2.connectedComponents(obj_mask.astype(np.uint8))
         for label in range(1, num_labels):
-            component = (labels == label)
+            component = labels == label
             area = np.sum(component)
             if area < CONFIG.MIN_AREA_PIXELS:
                 continue
 
-            mask_uint8 = (component.astype(np.uint8)) * 255
+            mask_uint8 = component.astype(np.uint8) * 255
             moments = cv2.moments(mask_uint8)
             hu = cv2.HuMoments(moments)
             hu = (np.sign(hu) * np.log10(np.abs(hu) + 1e-12)).flatten()
             distances = np.linalg.norm(self.expected_hu_set - hu, axis=1)
-            min_distance = np.min(distances)
-            if min_distance < CONFIG.SHAPE_THRESHOLD:
+            if np.min(distances) < CONFIG.SHAPE_THRESHOLD:
                 return True
         return False
 
     def find_object(self):
         try:
-            frames = self.pipeline.wait_for_frames()
-        except RuntimeError as e:
-            print(f"Frame timeout, restart pipeline: {e}")
+            frames = self._wait_for_frames()
+        except RuntimeError as error:
+            print_log(f"Frame timeout, restart pipeline: {error}")
             try:
                 self.pipeline.stop()
-            except:
+            except Exception:
                 pass
             time.sleep(1)
             self.pipeline.start(self.config)
             time.sleep(2)
-            frames = self.pipeline.wait_for_frames()
-            
+            frames = self._wait_for_frames()
+
         depth_frame = frames.get_depth_frame()
         if not depth_frame:
             return None
 
-        if CONFIG.DEBUGGING:
-            color_frame = frames.get_color_frame()
-
+        color_frame = frames.get_color_frame() if CONFIG.DEBUGGING else None
         depth = np.asanyarray(depth_frame.get_data())
-        
-        points = self._depth_to_points(depth_frame).reshape(self.h, self.w, 3)
-
-        roi_points = points[self.roi_mask].reshape(-1, 3)
-        valid = np.isfinite(roi_points[:,2])
-        roi_points = roi_points[valid]
-
-        #Table re-calibration
-        # new_plane = self.__estimate_plane(roi_points)
-        # if new_plane is not None:
-        #     new_distances = self.__point_plane_distance(roi_points, new_plane)
-        #     std_height = np.std(new_distances)
-        #     if std_height < CONFIG.THRESH_STD:
-        #         self.plane = new_plane
-
-        distances = self._point_plane_distance(roi_points)
-
-        height_map = np.zeros((self.h, self.w), dtype=np.float32)
-        roi_indices = np.argwhere(self.roi_mask)
-        roi_heights = distances
-        
-        for (y, x), hgt in zip(roi_indices, roi_heights):
-            if hgt > height_map[y, x]:
-                height_map[y, x] = hgt
-
+        height_map = self._build_height_map_from_depth_frame(depth_frame)
         object_mask = (height_map > CONFIG.MIN_HEIGHT_THRESHOLD) & (height_map < CONFIG.MAX_HEIGHT_THRESHOLD)
         object_detected = np.sum(object_mask) > CONFIG.MIN_AREA_PIXELS
         shape_ok = self.__shape_validation(object_mask)
-        
+
         if object_detected:
             self.detect_queue.append(object_mask)
-            if len(self.detect_queue)>CONFIG.MAX_LEN:
+            if len(self.detect_queue) > CONFIG.MAX_LEN:
                 self.detect_queue.pop(0)
                 if not self.obj_find:
-                    there_is_obj = self.__there_is_obj()
-                    self.obj_find = there_is_obj & shape_ok
+                    self.obj_find = self.__there_is_obj() & shape_ok
                 if CONFIG.DEBUGGING:
-                    save_img(depth, '_not_right_shape', 'debug_shape')
+                    _save_debug_artifact(depth, "_not_right_shape", "debug_shape")
                     if color_frame:
                         color = np.asanyarray(color_frame.get_data())
-                        save_img(color, '_shape', 'debug_shape_img')
+                        _save_debug_artifact(color, "_shape", "debug_shape_img")
         else:
             if self.obj_find:
-                self.obj_find = False   
+                self.obj_find = False
             self.detect_queue = []
-
 
         return self.obj_find, depth, object_mask
 
-#TODO: ricontrollare logica occlusioni 
-class QrCamera(Camera):
-    def __init__(self, shared_qr_state:SharedQRState, file_bag : str = None):
 
+class BaseQrReader:
+    def _read_aruco(self, img):
+        detector = _build_aruco_detector()
+        _, ids, _ = detector.detectMarkers(img)
+        if ids is not None:
+            return 0 in ids
+        return False
+
+    def _decode_codes(self, gray, timeout):
+        gray = cv2.GaussianBlur(gray, (3, 3), 0)
+        bw = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 31, 5)
+        return self.decode(bw, timeout=timeout, max_count=2)
+
+
+class QrCamera(RealSenseCamera, BaseQrReader):
+    def __init__(self, shared_qr_state: SharedQRState, file_bag: str = None):
+        from pylibdmtx.pylibdmtx import decode
+
+        self.decode = decode
         super().__init__(True, file_bag)
         self.ROI = CONFIG.ROI_QR
-
         self.shared_qr_state = shared_qr_state
         self._last_qr = None
-
         self.table_calibration()
 
-    def __del__(self):
-        if self.pipeline is not None:
-            self.pipeline.stop()
-
     def find_occlusion(self):
-        frames = self.pipeline.wait_for_frames()
-        depth_frame = frames.get_depth_frame()
+        depth_frame = self._wait_for_frames().get_depth_frame()
         if not depth_frame:
             return None
 
-        depth = np.asanyarray(depth_frame.get_data())
-        
-        points = self._depth_to_points(depth_frame).reshape(self.h, self.w, 3)
+        height_map = self._build_height_map_from_depth_frame(depth_frame)
+        object_mask = height_map > CONFIG.MIN_HEIGHT_THRESHOLD
+        return np.sum(object_mask) > CONFIG.OCCLUSION_THRESHOLD
 
-        roi_points = points[self.roi_mask].reshape(-1, 3)
-        valid = np.isfinite(roi_points[:,2])
-        roi_points = roi_points[valid]
-
-        #Table re-calibration
-        # new_plane = self.__estimate_plane(roi_points)
-        # if new_plane is not None:
-        #     new_distances = self.__point_plane_distance(roi_points, new_plane)
-        #     std_height = np.std(new_distances)
-        #     if std_height < CONFIG.THRESH_STD:
-        #         self.plane = new_plane
-
-
-        distances = self._point_plane_distance(roi_points)
-
-        height_map = np.zeros((self.h, self.w), dtype=np.float32)
-        roi_indices = np.argwhere(self.roi_mask)
-        roi_heights = distances
-        
-        for (y, x), hgt in zip(roi_indices, roi_heights):
-            if hgt > height_map[y, x]:
-                height_map[y, x] = hgt
-
-        object_mask = (height_map > CONFIG.MIN_HEIGHT_THRESHOLD)
-        occlusion = np.sum(object_mask) > CONFIG.OCCLUSION_THRESHOLD
-        
-        return occlusion
+    def _get_roi_image(self, img):
+        x0, y0, x1, y1 = CONFIG.ROI_QR
+        return img[y0:y1, x0:x1], (x0, y0, x1, y1)
 
     def read_qr(self):
-
         occlusion = self.find_occlusion()
-        frames = self.pipeline.wait_for_frames()
-
-        color_frame = frames.get_color_frame()
+        color_frame = self._wait_for_frames().get_color_frame()
         if not color_frame:
             return None, occlusion, None
 
         img = np.asanyarray(color_frame.get_data())
-        x0, y0, x1, y1 = CONFIG.ROI_QR
-        img_roi = img[y0:y1, x0:x1]
-
+        img_roi, (x0, y0, x1, y1) = self._get_roi_image(img)
         gray = cv2.cvtColor(img_roi, cv2.COLOR_BGR2GRAY)
 
-        # if in aruco mode, if a 0 aruco is not find, then i have occlusion
         not_aruco = True
-        if CONFIG.ARUCO_MODE:
-            if self.read_aruco(gray):
-                not_aruco = False
+        if CONFIG.ARUCO_MODE and self._read_aruco(gray):
+            not_aruco = False
 
-        gray = cv2.GaussianBlur(gray, (3, 3), 0)
-        #gray = cv2.equalizeHist(gray)
-        bw = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 31, 5)
+        codes = self._decode_codes(gray, timeout=150)
+        cv2.rectangle(img, (x0, y0), (x1, y1), (255, 0, 0), 2)
 
-        codes = decode(bw, timeout=150, max_count=2)
-
-        cv2.rectangle(
-            img,
-            (x0, y0),
-            (x1, y1),
-            (255, 0, 0),   # blu
-            2
-        )
-
-        if codes and len(codes)==1:
-            x, y, _, _= codes[0].rect
-
-            cv2.putText(
-                img,
-                codes[0].data.decode("utf-8",  errors="replace"),
-                (x + x0, y + y0 - 10),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                (0, 255, 0),
-                2
-            )
-            # NOTE: fuori da aruco mode questo è più sicuro se ritorni occlusion e non false
-            return codes[0].data.decode("utf-8",  errors="replace"), occlusion, img
-        elif codes and len(codes)>1:
+        if codes and len(codes) == 1:
+            x, y, _, _ = codes[0].rect
+            cv2.putText(img, _decode_text(codes[0]), (x + x0, y + y0 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            return _decode_text(codes[0]), occlusion, img
+        if codes and len(codes) > 1:
             for code in codes:
-                x, y, _, _= code.rect
-                cv2.putText(
-                    img,
-                    code.data.decode("utf-8",  errors="replace"),
-                    (x + x0, y + y0 - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.8,
-                    (0, 255, 0),
-                    2
-                )
+                x, y, _, _ = code.rect
+                cv2.putText(img, _decode_text(code), (x + x0, y + y0 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
             return None, True, img
 
         return None, occlusion or not_aruco, None
 
-    def read_aruco(self, img):
-        detector = cv2.aruco.ArucoDetector(cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_ARUCO_ORIGINAL), cv2.aruco.DetectorParameters())
-        corners, ids, rejected= detector.detectMarkers(img)
-        #corners, ids, rejected = cv2.aruco.detectMarkers(img, cv2.aruco.Dictionary_get(cv2.aruco.DICT_ARUCO_ORIGINAL), parameters=cv2.aruco.DetectorParameters_create())
 
-        if ids is not None:
-            return 0 in ids
-        else:
-            return False
+class ZEDQrCamera(BaseQrReader):
+    def __init__(self, shared_qr_state: SharedQRState, file_bag: str = None):
+        import pyzed.sl as sl
+        from pylibdmtx.pylibdmtx import decode
 
-
-
-class ZEDQrCamera():
-    def __init__(self, shared_qr_state:SharedQRState, file_bag : str = None):
+        self.sl = sl
+        self.decode = decode
         self.shared_qr_state = shared_qr_state
         self._last_qr = None
-        self.zed = None
-        self.zed = sl.Camera()
+        self.zed = self.sl.Camera()
 
-        init_params = sl.InitParameters()
-
+        init_params = self.sl.InitParameters()
         if file_bag is not None:
             init_parameters.set_from_svo_file(file_bag)
         else:
-            init_params.camera_resolution = sl.RESOLUTION.HD2K
-            init_params.depth_mode = sl.DEPTH_MODE.NEURAL
-            init_params.coordinate_units = sl.UNIT.METER
+            init_params.camera_resolution = self.sl.RESOLUTION.HD2K
+            init_params.depth_mode = self.sl.DEPTH_MODE.NEURAL
+            init_params.coordinate_units = self.sl.UNIT.METER
             init_params.sdk_verbose = 1
-   
+
         err = self.zed.open(init_params)
-        if err > sl.ERROR_CODE.SUCCESS:
-            print('Failure in opening zed')
+        if err > self.sl.ERROR_CODE.SUCCESS:
+            print_log("Failure in opening zed")
             exit(1)
 
         if file_bag is None:
-            self.zed.set_camera_settings(sl.VIDEO_SETTINGS.EXPOSURE, 60)
-            self.zed.set_camera_settings(sl.VIDEO_SETTINGS.GAIN, 20)
-            self.zed.set_camera_settings(sl.VIDEO_SETTINGS.SHARPNESS, 0)
-            self.zed.set_camera_settings(sl.VIDEO_SETTINGS.CONTRAST, 4)
+            self.zed.set_camera_settings(self.sl.VIDEO_SETTINGS.EXPOSURE, 60)
+            self.zed.set_camera_settings(self.sl.VIDEO_SETTINGS.GAIN, 20)
+            self.zed.set_camera_settings(self.sl.VIDEO_SETTINGS.SHARPNESS, 0)
+            self.zed.set_camera_settings(self.sl.VIDEO_SETTINGS.CONTRAST, 4)
 
-
-        self.runtime_params = sl.RuntimeParameters()
-        time.sleep(1)
-        print("First table calibration")
+        self.runtime_params = self.sl.RuntimeParameters()
+        print_log("First table calibration")
         self.plane = None
         self.roi_mask = None
         self.h = None
         self.w = None
+        time.sleep(1)
         self.table_calibration()
 
     def __del__(self):
-        if self.zed is not None:
+        if getattr(self, "zed", None) is not None:
             self.zed.close()
-            
-    def __depth_to_points(self, depth_frame):
-        points = self.pc.calculate(depth_frame)
-        verts = np.asanyarray(points.get_vertices()).view(np.float32)
-        return verts.reshape(-1, 3)
 
-    def __estimate_plane(self, points):
-        assert points.ndim == 2 and points.shape[1] == 3
+    def _grab_point_cloud(self):
+        if self.zed.grab(self.runtime_params) == self.sl.ERROR_CODE.SUCCESS:
+            point_cloud = self.sl.Mat()
+            self.zed.retrieve_measure(point_cloud, self.sl.MEASURE.XYZ)
+            return point_cloud
+        return None
 
-        X = points[:, :2]   # x, y
-        y = points[:, 2]    # z
+    def _grab_image(self):
+        if self.zed.grab(self.runtime_params) == self.sl.ERROR_CODE.SUCCESS:
+            image = self.sl.Mat()
+            self.zed.retrieve_image(image, self.sl.VIEW.LEFT)
+            return image
+        return None
 
-        ransac = RANSACRegressor(
-            estimator=LinearRegression(),
-            residual_threshold=CONFIG.PLANE_THRESHOLD,
-            min_samples=5000,
-            max_trials=100
-        )
-        try:
-            ransac.fit(X, y)
-
-            # Piano: z = ax + by + c
-            a_xy = ransac.estimator_.coef_
-            c_z = ransac.estimator_.intercept_
-        except:
-            return None
-
-        return np.array([a_xy[0], a_xy[1], -1.0, c_z], dtype=np.float64)
-
-    def table_calibration(self, depth_frame = None):
-        if self.zed.grab(self.runtime_params) == sl.ERROR_CODE.SUCCESS:
-            point_cloud = sl.Mat()
-            self.zed.retrieve_measure(point_cloud, sl.MEASURE.XYZ)
-        else:
-            print('Failure in grabbing ZED during table calibration')
-            exit(1)
-
-        depth = np.asanyarray(point_cloud.get_data())[:,:,:3]
-
-        self.h, self.w, _ = depth.shape
-        
+    def _build_roi_mask(self):
         x0, y0, x1, y1 = CONFIG.ROI_QR
-
         self.roi_mask = np.zeros((self.h, self.w), dtype=bool)
         self.roi_mask[y0:y1, x0:x1] = True
 
-        roi_points = depth[self.roi_mask]
-        roi_points = roi_points[np.isfinite(roi_points[:,2])]
-
-        self.plane = self.__estimate_plane(roi_points)
-        print("Piano stimato:", self.plane)
-
-    def __point_plane_distance(self, points, plane = None):
-        if plane is None:
-            plane = self.plane
-        a, b, c, d = self.plane
-        num = a*points[:,0] + b*points[:,1] + c*points[:,2] + d
-        den = np.sqrt(a*a + b*b + c*c)
-        return num / den
-
-    def find_occlusion(self):
-        if self.zed.grab(self.runtime_params) == sl.ERROR_CODE.SUCCESS:
-            point_cloud = sl.Mat()
-            self.zed.retrieve_measure(point_cloud, sl.MEASURE.XYZ)
-        else:
+    def table_calibration(self):
+        point_cloud = self._grab_point_cloud()
+        if point_cloud is None:
+            print_log("Failure in grabbing ZED during table calibration")
             exit(1)
 
-        points = np.asanyarray(point_cloud.get_data())[:,:,:3]
+        depth = np.asanyarray(point_cloud.get_data())[:, :, :3]
+        self.h, self.w, _ = depth.shape
+        self._build_roi_mask()
 
-        roi_points = points[self.roi_mask].reshape(-1, 3)
-        valid = np.isfinite(roi_points[:,2])
-        roi_points = roi_points[valid]
+        roi_points = depth[self.roi_mask]
+        roi_points = roi_points[np.isfinite(roi_points[:, 2])]
+        self.plane = _estimate_plane(roi_points)
+        print_log(f"Piano stimato: {self.plane}")
 
-        #Table re-calibration
-        # new_plane = self.__estimate_plane(roi_points)
-        # if new_plane is not None:
-        #     new_distances = self.__point_plane_distance(roi_points, new_plane)
-        #     std_height = np.std(new_distances)
-        #     if std_height < CONFIG.THRESH_STD:
-        #         self.plane = new_plane
+    def _build_height_map_from_points(self, points):
+        return _build_height_map(points, self.roi_mask, (self.h, self.w), self.plane)
 
+    def find_occlusion(self):
+        point_cloud = self._grab_point_cloud()
+        if point_cloud is None:
+            exit(1)
 
-        distances = self.__point_plane_distance(roi_points)
+        points = np.asanyarray(point_cloud.get_data())[:, :, :3]
+        height_map = self._build_height_map_from_points(points)
+        object_mask = height_map > CONFIG.MIN_HEIGHT_THRESHOLD
+        return np.sum(object_mask) > CONFIG.OCCLUSION_THRESHOLD
 
-        height_map = np.zeros((self.h, self.w), dtype=np.float32)
-        roi_indices = np.argwhere(self.roi_mask)
-        roi_heights = distances
-        
-        for (y, x), hgt in zip(roi_indices, roi_heights):
-            if hgt > height_map[y, x]:
-                height_map[y, x] = hgt
-
-        object_mask = (height_map > CONFIG.MIN_HEIGHT_THRESHOLD)
-        
-        occlusion = np.sum(object_mask) > CONFIG.OCCLUSION_THRESHOLD
-        
-        return occlusion
+    def _get_roi_image(self, img):
+        x0, y0, x1, y1 = CONFIG.ROI_QR
+        return img[y0:y1, x0:x1], (x0, y0, x1, y1)
 
     def read_qr(self):
         occlusion = self.find_occlusion()
-        if self.zed.grab(self.runtime_params) == sl.ERROR_CODE.SUCCESS:
-            image = sl.Mat()
-            self.zed.retrieve_image(image, sl.VIEW.LEFT)
-        else:
+        image = self._grab_image()
+        if image is None:
             exit(1)
 
         img = np.asanyarray(image.get_data())
-        x0, y0, x1, y1 = CONFIG.ROI_QR
-        img_roi = img[y0:y1, x0:x1]
-
+        img_roi, _ = self._get_roi_image(img)
         gray = cv2.cvtColor(img_roi, cv2.COLOR_RGBA2GRAY)
 
         not_aruco = False
-        if CONFIG.ARUCO_MODE:
-            if self.read_aruco(gray):
-                not_aruco = False
+        if CONFIG.ARUCO_MODE and self._read_aruco(gray):
+            not_aruco = False
 
-        gray = cv2.GaussianBlur(gray, (3, 3), 0)
-        
-        # TODO: magari fare fallback di questo
-        bw = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 31, 5)
-
-        codes = decode(bw, timeout=200, max_count=2)
-
-        if codes and len(codes)==1:
-            return codes[0].data.decode("utf-8",  errors="replace"), occlusion, img
-        elif codes and len(codes)>1:
+        codes = self._decode_codes(gray, timeout=200)
+        if codes and len(codes) == 1:
+            return _decode_text(codes[0]), occlusion, img
+        if codes and len(codes) > 1:
             return None, True, img
-
         return None, occlusion or not_aruco, None
-
-    def read_aruco(self, img):
-        detector = cv2.aruco.ArucoDetector(cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_ARUCO_ORIGINAL), cv2.aruco.DetectorParameters())
-        corners, ids, rejected= detector.detectMarkers(img)
-        #corners, ids, rejected = cv2.aruco.detectMarkers(img, cv2.aruco.Dictionary_get(cv2.aruco.DICT_ARUCO_ORIGINAL), parameters=cv2.aruco.DetectorParameters_create())
-
-        if ids is not None:
-            return 0 in ids
-        else:
-            return False
-
-def save_img(img, file_name:str, dir_name:str):
-    if not os.path.exists(dir_name):
-        os.mkdir(dir_name)
-    
-    full_name = str(time.time_ns()) + file_name
-    np.save(os.path.join(dir_name,full_name), img)

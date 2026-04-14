@@ -5,7 +5,6 @@
 
 #----------------Camera Parameters------------------#
 IS_ZED = False
-IS_DEMO = False
 ARUCO_MODE = False
 DEBUGGING = False
 
@@ -45,9 +44,9 @@ OCCLUSION_THRESHOLD = 1000
 #----------------End Camera Parameters------------------#
 
 #----------------GPIO Parameters------------------#
-#TODO: RE-NUMERATE PIN 
-BUTTON_PIN = 85
-LED_PIN = 106
+
+BUTTON_PIN = 85 
+LED_PIN = 106 
 #----------------End GPIO Parameters------------------#
 
 #----------------Handler Parameters------------------#

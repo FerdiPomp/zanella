@@ -1,41 +1,51 @@
-import gpiod
-from gpiod.line import Direction, Value
-import time
 import config as CONFIG
-import sys
+
+
+GPIO_CHIP = "/dev/gpiochip0"
+
 
 class Button:
     def __init__(self):
+        import gpiod
+        from gpiod.line import Direction
+
+        self.gpiod = gpiod
         self.button_pin = CONFIG.BUTTON_PIN
-        self.request_in = gpiod.request_lines(
-            "/dev/gpiochip0",
+        self.line_request = self.gpiod.request_lines(
+            GPIO_CHIP,
             consumer="Button_line",
-            config={
-                self.button_pin: gpiod.LineSettings(direction=Direction.INPUT)}
-        )  
-
-    def __del__(self):
-        self.request_in.release()
-
-    def pressed(self):
-        value = self.request_in.get_value(self.button_pin)
-        return value == value.ACTIVE
-
-class Light:
-    def __init__(self):
-        self.led_pin = CONFIG.LED_PIN
-        self.request_out = gpiod.request_lines(
-            "/dev/gpiochip0",
-            consumer="Led_line",
-            config={self.led_pin : gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE)}
+            config={self.button_pin: self.gpiod.LineSettings(direction=Direction.INPUT)},
         )
 
     def __del__(self):
-        self.request_out.release()
-    
+        if hasattr(self, "line_request"):
+            self.line_request.release()
+
+    def pressed(self):
+        value = self.line_request.get_value(self.button_pin)
+        return value == value.ACTIVE
+
+
+class Light:
+    def __init__(self):
+        import gpiod
+        from gpiod.line import Direction, Value
+
+        self.gpiod = gpiod
+        self.value = Value
+        self.led_pin = CONFIG.LED_PIN
+        self.line_request = self.gpiod.request_lines(
+            GPIO_CHIP,
+            consumer="Led_line",
+            config={self.led_pin: self.gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE)},
+        )
+
+    def __del__(self):
+        if hasattr(self, "line_request"):
+            self.line_request.release()
+
     def on(self):
-        self.request_out.set_value(self.led_pin , Value.ACTIVE)
+        self.line_request.set_value(self.led_pin, self.value.ACTIVE)
 
     def off(self):
-        self.request_out.set_value(self.led_pin , Value.INACTIVE)
-
+        self.line_request.set_value(self.led_pin, self.value.INACTIVE)
