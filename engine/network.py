@@ -1,10 +1,13 @@
 import json
 import threading
 import time
+from pathlib import Path
 
 import config as CONFIG
 from engine.event import Event
 from engine.runtime_utils import print_log
+
+HTTP_EVENT_ID_HEADER = "Event-ID"
 
 
 def _event_from_dict(data):
@@ -57,50 +60,88 @@ class HTTPSender:
         import requests
 
         self.requests = requests
+        self.session = self.requests.Session()
         self.server_ip = server_ip
         self.port = port
         self.endpoint = endpoint
         self.timeout = timeout
         self.url = f"http://{self.server_ip}:{self.port}{self.endpoint}"
 
-    def send(self, event: Event):
+    def send(self, event: Event, delivery_id: str = None) -> bool:
         """
         Invia l'evento al server.
-        Retry automatico se il server non risponde.
+        Un singolo tentativo: il retry viene gestito a livello del nodo.
         """
         print(f"Sending:{event}")
         payload = _event_to_payload(event)
+        headers = {}
+        if delivery_id is not None:
+            headers[HTTP_EVENT_ID_HEADER] = delivery_id
 
-        while True:
+        try:
+            response = self.session.post(self.url, json=payload, headers=headers, timeout=self.timeout)
+            return response.status_code == 200
+        except self.requests.RequestException:
             try:
-                response = self.requests.post(self.url, json=payload, timeout=self.timeout)
-                if response.status_code == 200:
-                    return
-            except self.requests.RequestException:
-                pass  # ignore e retry
-            time.sleep(1)
+                self.session.close()
+            except Exception:
+                pass
+            self.session = self.requests.Session()
+            return False
 
 
 class HTTPReceiver:
     def __init__(self, host=CONFIG.SERVER_URL, port=CONFIG.SERVER_PORT):
         from flask import Flask, jsonify, request
+        from werkzeug.serving import make_server
 
         self.Flask = Flask
         self.jsonify = jsonify
         self.request = request
+        self.make_server = make_server
         self.host = host
         self.port = port
         self.app = self.Flask(__name__)
+        self.server = None
+        self.seen_dir = Path(".runtime/http_seen")
+        self.seen_dir.mkdir(parents=True, exist_ok=True)
+
+    def _is_duplicate(self, delivery_id: str) -> bool:
+        if delivery_id is None:
+            return False
+        return (self.seen_dir / delivery_id).exists()
+
+    def _mark_seen(self, delivery_id: str) -> None:
+        if delivery_id is None:
+            return
+        (self.seen_dir / delivery_id).touch(exist_ok=True)
 
     def _register_routes(self, event_queue):
         @self.app.route("/event", methods=["POST"])
         def receive_event():
             data = self.request.json
+            delivery_id = self.request.headers.get(HTTP_EVENT_ID_HEADER)
             try:
-                event_queue.put(_event_from_dict(data))
+                if self._is_duplicate(delivery_id):
+                    return self.jsonify({"status": "ok"})
+                if hasattr(event_queue, "contains_item_id") and event_queue.contains_item_id(delivery_id):
+                    return self.jsonify({"status": "ok"})
+                event_queue.put(_event_from_dict(data), item_id=delivery_id)
+                self._mark_seen(delivery_id)
                 return self.jsonify({"status": "ok"})
             except Exception as e:
                 return self.jsonify({"status": "error", "msg": str(e)}), 400
+
+    def _serve_forever(self):
+        while True:
+            try:
+                self.server = self.make_server(self.host, self.port, self.app, threaded=True)
+                self.server.serve_forever()
+            except OSError:
+                time.sleep(1)
+            except Exception as error:
+                print_log(f"HTTPReceiver failure: {error}")
+                time.sleep(1)
 
     def start(self, event_queue):
         """
@@ -109,6 +150,6 @@ class HTTPReceiver:
         """
         self._register_routes(event_queue)
         threading.Thread(
-            target=lambda: self.app.run(host=self.host, port=self.port),
+            target=self._serve_forever,
             daemon=True,
         ).start()
