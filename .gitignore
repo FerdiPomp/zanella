@@ -9,3 +9,4 @@ vis_recorded.py
 data/
 certificate.crt
 run.sh
+.codex

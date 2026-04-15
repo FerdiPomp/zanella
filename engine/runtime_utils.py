@@ -6,7 +6,7 @@ import numpy as np
 
 
 def current_day_stamp() -> str:
-    return datetime.now().strftime("%Y%m%d")
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
 def format_log(message: str) -> str:

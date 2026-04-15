@@ -340,7 +340,7 @@ class ZEDQrCamera(BaseQrReader):
 
         init_params = self.sl.InitParameters()
         if file_bag is not None:
-            init_parameters.set_from_svo_file(file_bag)
+            init_params.set_from_svo_file(file_bag)
         else:
             init_params.camera_resolution = self.sl.RESOLUTION.HD2K
             init_params.depth_mode = self.sl.DEPTH_MODE.NEURAL
