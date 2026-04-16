@@ -4,6 +4,7 @@ import time
 
 import config as CONFIG
 from engine.event import Event
+from engine.runtime_utils import print_log
 from engine.runtime_utils import save_numpy_artifact
 from hardware.camera import ObjCamera, QrCamera, SharedQRState, ZEDQrCamera
 from hardware.gpio import Button, Light
@@ -129,7 +130,13 @@ def QrHandler(stop_event, event_queue, node_id, shared_qr_state: SharedQRState, 
     video_seq = []
     record = False
     while not stop_event.is_set():
-        qr, occlusion, vis = camera.read_qr()
+        try:
+            qr, occlusion, vis = camera.read_qr()
+        except Exception as error:
+            print_log(f"QR camera failure: {error}")
+            time.sleep(CONFIG.ZED_GRAB_RETRY_DELAY)
+            camera = _build_qr_camera(shared_qr_state, file_bag)
+            continue
         now = time.time()
 
         if state == CONFIG.NO_QR:

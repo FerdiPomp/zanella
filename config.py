@@ -41,6 +41,9 @@ MAX_LEN = 5
 
 #Max number of pixel for detect occlusion on qr reading
 OCCLUSION_THRESHOLD = 1000
+
+ZED_GRAB_RETRY_COUNT = 10
+ZED_GRAB_RETRY_DELAY = 0.5
 #----------------End Camera Parameters------------------#
 
 #----------------GPIO Parameters------------------#

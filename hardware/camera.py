@@ -336,28 +336,8 @@ class ZEDQrCamera(BaseQrReader):
         self.decode = decode
         self.shared_qr_state = shared_qr_state
         self._last_qr = None
-        self.zed = self.sl.Camera()
-
-        init_params = self.sl.InitParameters()
-        if file_bag is not None:
-            init_params.set_from_svo_file(file_bag)
-        else:
-            init_params.camera_resolution = self.sl.RESOLUTION.HD2K
-            init_params.depth_mode = self.sl.DEPTH_MODE.NEURAL
-            init_params.coordinate_units = self.sl.UNIT.METER
-            init_params.sdk_verbose = 1
-
-        err = self.zed.open(init_params)
-        if err > self.sl.ERROR_CODE.SUCCESS:
-            print_log("Failure in opening zed")
-            exit(1)
-
-        if file_bag is None:
-            self.zed.set_camera_settings(self.sl.VIDEO_SETTINGS.EXPOSURE, 60)
-            self.zed.set_camera_settings(self.sl.VIDEO_SETTINGS.GAIN, 20)
-            self.zed.set_camera_settings(self.sl.VIDEO_SETTINGS.SHARPNESS, 0)
-            self.zed.set_camera_settings(self.sl.VIDEO_SETTINGS.CONTRAST, 4)
-
+        self.file_bag = file_bag
+        self.zed = None
         self.runtime_params = self.sl.RuntimeParameters()
         print_log("First table calibration")
         self.plane = None
@@ -365,37 +345,73 @@ class ZEDQrCamera(BaseQrReader):
         self.h = None
         self.w = None
         time.sleep(1)
+        self._open_camera()
         self.table_calibration()
 
     def __del__(self):
         if getattr(self, "zed", None) is not None:
             self.zed.close()
 
-    def _grab_point_cloud(self):
-        if self.zed.grab(self.runtime_params) == self.sl.ERROR_CODE.SUCCESS:
-            point_cloud = self.sl.Mat()
-            self.zed.retrieve_measure(point_cloud, self.sl.MEASURE.XYZ)
-            return point_cloud
-        return None
+    def _build_init_params(self):
+        init_params = self.sl.InitParameters()
+        if self.file_bag is not None:
+            init_params.set_from_svo_file(self.file_bag)
+        else:
+            init_params.camera_resolution = self.sl.RESOLUTION.HD2K
+            init_params.depth_mode = self.sl.DEPTH_MODE.NEURAL
+            init_params.coordinate_units = self.sl.UNIT.METER
+            init_params.sdk_verbose = 1
+        return init_params
 
-    def _grab_image(self):
-        if self.zed.grab(self.runtime_params) == self.sl.ERROR_CODE.SUCCESS:
-            image = self.sl.Mat()
-            self.zed.retrieve_image(image, self.sl.VIEW.LEFT)
-            return image
-        return None
+    def _apply_live_settings(self):
+        if self.file_bag is None:
+            self.zed.set_camera_settings(self.sl.VIDEO_SETTINGS.EXPOSURE, 60)
+            self.zed.set_camera_settings(self.sl.VIDEO_SETTINGS.GAIN, 20)
+            self.zed.set_camera_settings(self.sl.VIDEO_SETTINGS.SHARPNESS, 0)
+            self.zed.set_camera_settings(self.sl.VIDEO_SETTINGS.CONTRAST, 4)
+
+    def _open_camera(self):
+        if self.zed is not None:
+            try:
+                self.zed.close()
+            except Exception:
+                pass
+
+        self.zed = self.sl.Camera()
+        err = self.zed.open(self._build_init_params())
+        if err > self.sl.ERROR_CODE.SUCCESS:
+            raise RuntimeError("Failure in opening zed")
+        self._apply_live_settings()
+
+    def _grab_frame(self):
+        last_error = None
+        for attempt in range(CONFIG.ZED_GRAB_RETRY_COUNT):
+            error_code = self.zed.grab(self.runtime_params)
+            if error_code == self.sl.ERROR_CODE.SUCCESS:
+                if attempt > 0:
+                    print_log("ZED grab recovered")
+                return
+            last_error = error_code
+            time.sleep(CONFIG.ZED_GRAB_RETRY_DELAY)
+
+        print_log(f"ZED grab failed repeatedly ({last_error}), reopening camera")
+        self._open_camera()
+        error_code = self.zed.grab(self.runtime_params)
+        if error_code != self.sl.ERROR_CODE.SUCCESS:
+            raise RuntimeError(f"ZED grab unrecoverable ({error_code})")
+
+    def _grab_point_cloud(self):
+        self._grab_frame()
+        point_cloud = self.sl.Mat()
+        self.zed.retrieve_measure(point_cloud, self.sl.MEASURE.XYZ)
+        return point_cloud
 
     def _build_roi_mask(self):
         x0, y0, x1, y1 = CONFIG.ROI_QR
         self.roi_mask = np.zeros((self.h, self.w), dtype=bool)
         self.roi_mask[y0:y1, x0:x1] = True
 
-    def table_calibration(self):
-        point_cloud = self._grab_point_cloud()
-        if point_cloud is None:
-            print_log("Failure in grabbing ZED during table calibration")
-            exit(1)
-
+    def _calibrate_plane_from_point_cloud(self, point_cloud):
         depth = np.asanyarray(point_cloud.get_data())[:, :, :3]
         self.h, self.w, _ = depth.shape
         self._build_roi_mask()
@@ -405,14 +421,15 @@ class ZEDQrCamera(BaseQrReader):
         self.plane = _estimate_plane(roi_points)
         print_log(f"Piano stimato: {self.plane}")
 
+    def table_calibration(self):
+        point_cloud = self._grab_point_cloud()
+        self._calibrate_plane_from_point_cloud(point_cloud)
+
     def _build_height_map_from_points(self, points):
         return _build_height_map(points, self.roi_mask, (self.h, self.w), self.plane)
 
     def find_occlusion(self):
         point_cloud = self._grab_point_cloud()
-        if point_cloud is None:
-            exit(1)
-
         points = np.asanyarray(point_cloud.get_data())[:, :, :3]
         height_map = self._build_height_map_from_points(points)
         object_mask = height_map > CONFIG.MIN_HEIGHT_THRESHOLD
@@ -423,10 +440,16 @@ class ZEDQrCamera(BaseQrReader):
         return img[y0:y1, x0:x1], (x0, y0, x1, y1)
 
     def read_qr(self):
-        occlusion = self.find_occlusion()
-        image = self._grab_image()
-        if image is None:
-            exit(1)
+        self._grab_frame()
+        point_cloud = self.sl.Mat()
+        image = self.sl.Mat()
+        self.zed.retrieve_measure(point_cloud, self.sl.MEASURE.XYZ)
+        self.zed.retrieve_image(image, self.sl.VIEW.LEFT)
+
+        points = np.asanyarray(point_cloud.get_data())[:, :, :3]
+        height_map = self._build_height_map_from_points(points)
+        object_mask = height_map > CONFIG.MIN_HEIGHT_THRESHOLD
+        occlusion = np.sum(object_mask) > CONFIG.OCCLUSION_THRESHOLD
 
         img = np.asanyarray(image.get_data())
         img_roi, _ = self._get_roi_image(img)
