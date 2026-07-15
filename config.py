@@ -87,6 +87,8 @@ ONLINE_SENDER_ENV = False
 #----------------Network Parameters------------------#
 SERVER_URL = "192.168.0.233"
 SERVER_PORT = 9000
+TABLE_NODE_IPS = ()
+WORK_STATE_SYNC_INTERVAL = 1
 BROKER_IP = "mqtt.192.168.0.60.nip.io"
 MQTT_PORT = 443
 #----------------End Network Parameters------------------#

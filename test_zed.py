@@ -29,10 +29,11 @@ THRESH_STD = 0.1
 zed = sl.Camera()
 
 # Create a InitParameters object and set configuration parameters
-init_params = sl.InitParameters()
-init_params.depth_mode = sl.DEPTH_MODE.NEURAL
-init_params.coordinate_units = sl.UNIT.METER
-init_params.sdk_verbose = 1
+# init_params = sl.InitParameters()
+# init_params.depth_mode = sl.DEPTH_MODE.NEURAL
+# init_params.coordinate_units = sl.UNIT.METER
+# init_params.sdk_verbose = 1
+init_params.set_from_svo_file('./calibration.svo2')
 
 # Open the camera
 err = zed.open(init_params)

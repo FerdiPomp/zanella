@@ -7,9 +7,10 @@ print("Calibration ZED2 - premi 'q' per uscire")
 # ================== ZED Init ==================
 zed = sl.Camera()
 
-init_params = sl.InitParameters()
-init_params.camera_resolution = sl.RESOLUTION.HD2K
-init_params.camera_fps = 30
+# init_params = sl.InitParameters()
+# init_params.camera_resolution = sl.RESOLUTION.HD2K
+# init_params.camera_fps = 30
+init_params.set_from_svo_file('./calibration.svo2')
 
 err = zed.open(init_params)
 if err != sl.ERROR_CODE.SUCCESS:

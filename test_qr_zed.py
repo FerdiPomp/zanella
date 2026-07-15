@@ -21,7 +21,7 @@ zed = sl.Camera()
 init_params = sl.InitParameters()
 
 if USE_BAG:
-    init_params.set_from_svo_file('./test_qr_zed.svo2')
+    init_params.set_from_svo_file('./calibration.svo2')
 else:
     init_params.camera_resolution = sl.RESOLUTION.HD2K
     init_params.depth_mode = sl.DEPTH_MODE.NEURAL

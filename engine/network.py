@@ -78,8 +78,14 @@ class HTTPSender:
         if delivery_id is not None:
             headers[HTTP_EVENT_ID_HEADER] = delivery_id
 
+        return self._post(payload, headers)
+
+    def send_work_state(self, work_state: bool) -> bool:
+        return self._post({"work_state": work_state})
+
+    def _post(self, payload, headers=None) -> bool:
         try:
-            response = self.session.post(self.url, json=payload, headers=headers, timeout=self.timeout)
+            response = self.session.post(self.url, json=payload, headers=headers or {}, timeout=self.timeout)
             return response.status_code == 200
         except self.requests.RequestException:
             try:
@@ -103,6 +109,8 @@ class HTTPReceiver:
         self.port = port
         self.app = self.Flask(__name__)
         self.server = None
+        self.thread = None
+        self.stop_event = threading.Event()
         self.seen_dir = Path(".runtime/http_seen")
         self.seen_dir.mkdir(parents=True, exist_ok=True)
 
@@ -116,26 +124,39 @@ class HTTPReceiver:
             return
         (self.seen_dir / delivery_id).touch(exist_ok=True)
 
-    def _register_routes(self, event_queue):
-        @self.app.route("/event", methods=["POST"])
-        def receive_event():
-            data = self.request.json
-            delivery_id = self.request.headers.get(HTTP_EVENT_ID_HEADER)
-            try:
-                if self._is_duplicate(delivery_id):
+    def _register_routes(self, event_queue=None, work_state=None):
+        if event_queue is not None:
+            @self.app.route("/event", methods=["POST"])
+            def receive_event():
+                data = self.request.json
+                delivery_id = self.request.headers.get(HTTP_EVENT_ID_HEADER)
+                try:
+                    if self._is_duplicate(delivery_id):
+                        return self.jsonify({"status": "ok"})
+                    if hasattr(event_queue, "contains_item_id") and event_queue.contains_item_id(delivery_id):
+                        return self.jsonify({"status": "ok"})
+                    event_queue.put(_event_from_dict(data), item_id=delivery_id)
+                    self._mark_seen(delivery_id)
                     return self.jsonify({"status": "ok"})
-                if hasattr(event_queue, "contains_item_id") and event_queue.contains_item_id(delivery_id):
-                    return self.jsonify({"status": "ok"})
-                event_queue.put(_event_from_dict(data), item_id=delivery_id)
-                self._mark_seen(delivery_id)
+                except Exception as e:
+                    return self.jsonify({"status": "error", "msg": str(e)}), 400
+
+        if work_state is not None:
+            @self.app.route("/work_state", methods=["POST"])
+            def receive_work_state():
+                value = self.request.json.get("work_state")
+                if not isinstance(value, bool):
+                    return self.jsonify({"status": "error", "msg": "work_state must be boolean"}), 400
+                work_state.changeState(value)
                 return self.jsonify({"status": "ok"})
-            except Exception as e:
-                return self.jsonify({"status": "error", "msg": str(e)}), 400
 
     def _serve_forever(self):
-        while True:
+        while not self.stop_event.is_set():
             try:
                 self.server = self.make_server(self.host, self.port, self.app, threaded=True)
+                if self.stop_event.is_set():
+                    self.server.server_close()
+                    return
                 self.server.serve_forever()
             except OSError:
                 time.sleep(1)
@@ -143,13 +164,22 @@ class HTTPReceiver:
                 print_log(f"HTTPReceiver failure: {error}")
                 time.sleep(1)
 
-    def start(self, event_queue):
+    def start(self, event_queue=None, work_state=None):
         """
         Avvia il server Flask in un thread separato
         e riempie la queue con Event.
         """
-        self._register_routes(event_queue)
-        threading.Thread(
+        self._register_routes(event_queue, work_state)
+        self.thread = threading.Thread(
             target=self._serve_forever,
             daemon=True,
-        ).start()
+        )
+        self.thread.start()
+
+    def stop(self):
+        self.stop_event.set()
+        if self.server is not None:
+            self.server.shutdown()
+            self.server.server_close()
+        if self.thread is not None:
+            self.thread.join()

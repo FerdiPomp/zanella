@@ -37,10 +37,10 @@ def validate_runtime_dependencies(node_id: str) -> None:
     if CONFIG.THERE_IS_LED or CONFIG.THERE_IS_BUTTON:
         _require_module("gpiod")
 
-    if CONFIG.ONLINE_SENDER:
+    if CONFIG.ONLINE_SENDER or node_id == "C":
         _require_module("requests")
 
-    if node_id == "C" and CONFIG.ONLINE_RECIEVER:
+    if node_id in {"A", "B"} or (node_id == "C" and CONFIG.ONLINE_RECIEVER):
         _require_module("flask")
 
     if node_id == "C" and CONFIG.ONLINE_SENDER_ENV:

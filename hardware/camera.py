@@ -101,6 +101,19 @@ class SharedQRState:
             return self._prev_qr, self._prev_timestamp
 
 
+class SharedState:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._work_state = False
+
+    def get(self):
+        with self._lock:
+            return self._work_state
+
+    def changeState(self, new_state: bool):
+        with self._lock:
+            self._work_state = new_state
+
 class RealSenseCamera:
     def __init__(self, rgb: bool, file_bag: str = None):
         import pyrealsense2 as rs
@@ -307,9 +320,9 @@ class QrCamera(RealSenseCamera, BaseQrReader):
         img_roi, (x0, y0, x1, y1) = self._get_roi_image(img)
         gray = cv2.cvtColor(img_roi, cv2.COLOR_BGR2GRAY)
 
-        not_aruco = True
+        aruco = False
         if CONFIG.ARUCO_MODE and self._read_aruco(gray):
-            not_aruco = False
+            not_aruco = True
 
         codes = self._decode_codes(gray, timeout=150)
         cv2.rectangle(img, (x0, y0), (x1, y1), (255, 0, 0), 2)
@@ -324,7 +337,7 @@ class QrCamera(RealSenseCamera, BaseQrReader):
                 cv2.putText(img, _decode_text(code), (x + x0, y + y0 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
             return None, True, img
 
-        return None, occlusion or not_aruco, None
+        return None, occlusion and (not aruco), None
 
 
 class ZEDQrCamera(BaseQrReader):
@@ -455,13 +468,13 @@ class ZEDQrCamera(BaseQrReader):
         img_roi, _ = self._get_roi_image(img)
         gray = cv2.cvtColor(img_roi, cv2.COLOR_RGBA2GRAY)
 
-        not_aruco = False
+        aruco = False
         if CONFIG.ARUCO_MODE and self._read_aruco(gray):
-            not_aruco = False
+            aruco = True
 
         codes = self._decode_codes(gray, timeout=200)
         if codes and len(codes) == 1:
             return _decode_text(codes[0]), occlusion, img
         if codes and len(codes) > 1:
             return None, True, img
-        return None, occlusion or not_aruco, None
+        return None, occlusion and (not aruco), None

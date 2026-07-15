@@ -8,7 +8,7 @@ from engine.handler import ButtonPressHandler, LightHandler, ObjectDetectionHand
 from engine.network import HTTPReceiver, HTTPSender, MQTTSender
 from engine.persistence import PersistentEventQueue
 from engine.runtime_utils import print_log
-from hardware.camera import SharedQRState
+from hardware.camera import SharedQRState, SharedState
 
 
 QR_EVENTS = ["QR_APPEND", "QR_REMOVED"]
@@ -45,6 +45,9 @@ class BaseNode:
 
     def stop(self):
         self.stop_event.set()
+        receiver = getattr(self, "receiver", None)
+        if receiver is not None:
+            receiver.stop()
         for thread in self.threads:
             thread.join()
 
@@ -53,7 +56,9 @@ class EdgeNode(BaseNode):
     def __init__(self, node_id):
         super().__init__(node_id, queue_dir=f".runtime/http_out_{node_id}")
         self.sender = HTTPSender() if CONFIG.ONLINE_SENDER else None
+        self.receiver = HTTPReceiver(host="0.0.0.0")
         self.led_queue = Queue()
+        self.work_state = SharedState()
 
     def _network_loop(self):
         if CONFIG.ONLINE_SENDER:
@@ -82,7 +87,7 @@ class EdgeNode(BaseNode):
         self.threads.append(
             threading.Thread(
                 target=ObjectDetectionHandler,
-                args=(self.stop_event, self.event_queue, self.node_id, event_type, self.led_queue, file_bag),
+                args=(self.stop_event, self.event_queue, self.node_id, event_type, self.work_state, self.led_queue, file_bag),
                 daemon=False,
             )
         )
@@ -97,11 +102,15 @@ class EdgeNode(BaseNode):
                 )
             )
 
+    def _start_work_state_receiver(self):
+        self.receiver.start(work_state=self.work_state)
+
 
 class EnterNode(EdgeNode):
     def start(self, file_bag: str = None):
         self._append_object_thread("ENTER_DETECT", file_bag)
         self._append_led_thread_if_enabled()
+        self._start_work_state_receiver()
         self._start_network_thread(self._network_loop)
         self._start_worker_threads()
 
@@ -112,7 +121,7 @@ class ExitNode(EdgeNode):
             self.threads.append(
                 threading.Thread(
                     target=ButtonPressHandler,
-                    args=(self.stop_event, self.event_queue, self.node_id, self.led_queue),
+                    args=(self.stop_event, self.event_queue, self.node_id, self.work_state, self.led_queue),
                     daemon=False,
                 )
             )
@@ -121,6 +130,7 @@ class ExitNode(EdgeNode):
         self._append_object_thread("EXIT_DETECT", file_bag)
         self._append_led_thread_if_enabled()
         self._append_button_thread_if_enabled()
+        self._start_work_state_receiver()
         self._start_network_thread(self._network_loop)
         self._start_worker_threads()
 
@@ -131,7 +141,26 @@ class EnvNode(BaseNode):
         self.sender = MQTTSender(broker_psw, topic) if CONFIG.ONLINE_SENDER_ENV else None
         self.receiver = HTTPReceiver() if CONFIG.ONLINE_RECIEVER else None
         self.shared_qr_state = SharedQRState()
+        self.work_state = SharedState()
+        self.work_state_changed = threading.Event()
+        if not CONFIG.TABLE_NODE_IPS or not all(CONFIG.TABLE_NODE_IPS):
+            raise RuntimeError("TABLE_NODE_IPS must contain the IP addresses of the table stations")
+        if CONFIG.WORK_STATE_SYNC_INTERVAL <= 0:
+            raise RuntimeError("WORK_STATE_SYNC_INTERVAL must be greater than zero")
+        self.work_state_senders = [HTTPSender(ip, endpoint="/work_state") for ip in CONFIG.TABLE_NODE_IPS]
         self.workspace = workspace
+
+    def _set_work_state(self, value: bool):
+        self.work_state.changeState(value)
+        self.work_state_changed.set()
+
+    def _work_state_loop(self):
+        while not self.stop_event.is_set():
+            self.work_state_changed.clear()
+            value = self.work_state.get()
+            for sender in self.work_state_senders:
+                sender.send_work_state(value)
+            self.work_state_changed.wait(CONFIG.WORK_STATE_SYNC_INTERVAL)
 
     def _resolve_qr_for_event(self, event: Event):
         qr, qr_time = self.shared_qr_state.get()
@@ -191,10 +220,11 @@ class EnvNode(BaseNode):
         self.threads.append(
             threading.Thread(
                 target=QrHandler,
-                args=(self.stop_event, self.event_queue, self.node_id, self.shared_qr_state, file_bag),
+                args=(self.stop_event, self.event_queue, self.node_id, self.shared_qr_state, self._set_work_state, file_bag),
                 daemon=False,
             )
         )
 
         self._start_network_thread(self._network_loop)
+        self._start_network_thread(self._work_state_loop)
         self._start_worker_threads()

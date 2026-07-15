@@ -10,3 +10,5 @@ data/
 certificate.crt
 run.sh
 .codex
+calibration.svo2
+__pycache__/
