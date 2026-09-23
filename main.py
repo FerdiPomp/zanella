@@ -31,6 +31,9 @@ def validate_runtime_dependencies(node_id: str) -> None:
         cv2 = _require_module("cv2")
         if not hasattr(cv2, "aruco"):
             raise RuntimeError("ZED_ENV_HAS_DEPTH=False requires OpenCV ArUco support")
+        sl = _require_module("pyzed.sl")
+        if not hasattr(sl, "CameraOne") or not hasattr(sl, "InitParametersOne"):
+            raise RuntimeError("ZED X One requires a ZED SDK with CameraOne support")
 
     if node_id in {"A", "B"}:
         if CONFIG.IS_ZED:

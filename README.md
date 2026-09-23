@@ -98,7 +98,7 @@ ZED_ENV_HAS_DEPTH = False
 ARUCO_MODE = True
 ```
 
-The camera opens with ZED depth disabled. No plane is calibrated or stored, and no point cloud is requested. With no DataMatrix, a visible ArUco placeholder means normal visibility and permits `QR_REMOVED`; if both the DataMatrix and ArUco are absent, the reader reports occlusion and leaves the QR FSM unchanged. This mode is rejected at startup unless OpenCV ArUco support is installed. `ZED_ENV_HAS_DEPTH=False` is valid only on node C.
+The camera uses the ZED SDK monocular `CameraOne` API; it has no depth mode, plane or point cloud. With no DataMatrix, a visible ArUco placeholder means normal visibility and permits `QR_REMOVED`; if both the DataMatrix and ArUco are absent, the reader reports occlusion and leaves the QR FSM unchanged. This mode is rejected at startup unless OpenCV ArUco support and a ZED SDK exposing `CameraOne` are installed. `ZED_ENV_HAS_DEPTH=False` is valid only on node C.
 
 ## Running
 

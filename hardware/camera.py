@@ -509,11 +509,18 @@ class ZEDQrCamera(BaseQrReader):
         self.sl = sl
         self.decode = decode
         self.has_depth = CONFIG.ZED_ENV_HAS_DEPTH
+        self.is_zed_one = not self.has_depth
+        if self.is_zed_one and (
+            not hasattr(self.sl, "CameraOne") or not hasattr(self.sl, "InitParametersOne")
+        ):
+            raise RuntimeError("ZED X One requires a ZED SDK with CameraOne support")
+        if self.is_zed_one and file_bag is not None:
+            raise RuntimeError("ZED X One file playback is not supported")
         self.shared_qr_state = shared_qr_state
         self._last_qr = None
         self.file_bag = file_bag
         self.zed = None
-        self.runtime_params = self.sl.RuntimeParameters()
+        self.runtime_params = None if self.is_zed_one else self.sl.RuntimeParameters()
         self.plane = None
         self.roi_mask = None
         self.h = None
@@ -540,20 +547,24 @@ class ZEDQrCamera(BaseQrReader):
             self.zed = None
 
     def _build_init_params(self):
+        if self.is_zed_one:
+            init_params = self.sl.InitParametersOne()
+            init_params.camera_resolution = self.sl.RESOLUTION.AUTO
+            init_params.camera_fps = 30
+            return init_params
+
         init_params = self.sl.InitParameters()
         if self.file_bag is not None:
             init_params.set_from_svo_file(self.file_bag)
-            if not self.has_depth:
-                init_params.depth_mode = self.sl.DEPTH_MODE.NONE
         else:
             init_params.camera_resolution = self.sl.RESOLUTION.HD2K
-            init_params.depth_mode = self.sl.DEPTH_MODE.NEURAL if self.has_depth else self.sl.DEPTH_MODE.NONE
+            init_params.depth_mode = self.sl.DEPTH_MODE.NEURAL
             init_params.coordinate_units = self.sl.UNIT.METER
             init_params.sdk_verbose = 1
         return init_params
 
     def _apply_live_settings(self):
-        if self.file_bag is None:
+        if self.file_bag is None and not self.is_zed_one:
             self.zed.set_camera_settings(self.sl.VIDEO_SETTINGS.EXPOSURE, 60)
             self.zed.set_camera_settings(self.sl.VIDEO_SETTINGS.GAIN, 20)
             self.zed.set_camera_settings(self.sl.VIDEO_SETTINGS.SHARPNESS, 0)
@@ -566,7 +577,7 @@ class ZEDQrCamera(BaseQrReader):
             except Exception:
                 pass
 
-        self.zed = self.sl.Camera()
+        self.zed = self.sl.CameraOne() if self.is_zed_one else self.sl.Camera()
         err = self.zed.open(self._build_init_params())
         if err > self.sl.ERROR_CODE.SUCCESS:
             raise RuntimeError("Failure in opening zed")
@@ -575,7 +586,7 @@ class ZEDQrCamera(BaseQrReader):
     def _grab_frame(self):
         last_error = None
         for attempt in range(CONFIG.ZED_GRAB_RETRY_COUNT):
-            error_code = self.zed.grab(self.runtime_params)
+            error_code = self.zed.grab() if self.is_zed_one else self.zed.grab(self.runtime_params)
             if error_code == self.sl.ERROR_CODE.SUCCESS:
                 if attempt > 0:
                     print_log("ZED grab recovered")
@@ -585,7 +596,7 @@ class ZEDQrCamera(BaseQrReader):
 
         print_log(f"ZED grab failed repeatedly ({last_error}), reopening camera")
         self._open_camera()
-        error_code = self.zed.grab(self.runtime_params)
+        error_code = self.zed.grab() if self.is_zed_one else self.zed.grab(self.runtime_params)
         if error_code != self.sl.ERROR_CODE.SUCCESS:
             raise RuntimeError(f"ZED grab unrecoverable ({error_code})")
 
@@ -640,7 +651,10 @@ class ZEDQrCamera(BaseQrReader):
     def read_qr(self):
         self._grab_frame()
         image = self.sl.Mat()
-        self.zed.retrieve_image(image, self.sl.VIEW.LEFT)
+        if self.is_zed_one:
+            self.zed.retrieve_image(image)
+        else:
+            self.zed.retrieve_image(image, self.sl.VIEW.LEFT)
 
         occlusion = False
         if self.has_depth:
@@ -653,7 +667,10 @@ class ZEDQrCamera(BaseQrReader):
 
         img = np.asanyarray(image.get_data())
         img_roi, _ = self._get_roi_image(img)
-        gray = cv2.cvtColor(img_roi, cv2.COLOR_RGBA2GRAY)
+        if img_roi.ndim == 3 and img_roi.shape[2] == 4:
+            gray = cv2.cvtColor(img_roi, cv2.COLOR_RGBA2GRAY)
+        else:
+            gray = cv2.cvtColor(img_roi, cv2.COLOR_BGR2GRAY)
 
         aruco = False
         if CONFIG.ARUCO_MODE and self._read_aruco(gray):
