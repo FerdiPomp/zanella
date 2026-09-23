@@ -24,8 +24,9 @@ def _require_module(module_name: str) -> None:
 def validate_runtime_dependencies(node_id: str) -> None:
     if node_id in {"A", "B"}:
         if CONFIG.IS_ZED:
-            raise RuntimeError("I nodi A e B usano ObjCamera RealSense: con IS_ZED=True questa configurazione e' incoerente")
-        _require_module("pyrealsense2")
+            _require_module("pyzed.sl")
+        else:
+            _require_module("pyrealsense2")
 
     if node_id == "C":
         if CONFIG.IS_ZED:

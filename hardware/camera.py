@@ -45,7 +45,7 @@ def _build_height_map(points, roi_mask, image_shape, plane):
 
     distances = _point_plane_distance(roi_points, plane)
     height_map = np.zeros(image_shape, dtype=np.float32)
-    roi_indices = np.argwhere(roi_mask)
+    roi_indices = np.argwhere(roi_mask)[valid]
 
     for (y, x), height in zip(roi_indices, distances):
         if height > height_map[y, x]:
@@ -191,27 +191,23 @@ class RealSenseCamera:
         return _build_height_map(points, self.roi_mask, (self.h, self.w), self.plane)
 
 
-class ObjCamera(RealSenseCamera):
-    def __init__(self, is_enter_node: bool, file_bag: str = None):
-        super().__init__(CONFIG.DEBUGGING, file_bag)
-        self.ROI = CONFIG.ROI_A if is_enter_node else CONFIG.ROI_B
+class ObjectDetectionCamera:
+    def _init_object_detection(self):
         self.detect_queue = []
         self.obj_find = False
         self.expected_hu_set = np.load("expected_shape/expected_hu.npy")
-        time.sleep(3)
-        self.table_calibration()
 
-    def __overlap(self, mask1, mask2):
+    def _overlap(self, mask1, mask2):
         inter = np.logical_and(mask1, mask2)
         return np.sum(inter) / max(np.sum(mask1), 1)
 
-    def __there_is_obj(self):
+    def _there_is_obj(self):
         for index in range(len(self.detect_queue) - 1):
-            if not (self.__overlap(self.detect_queue[index], self.detect_queue[index + 1]) > 0.70):
+            if not (self._overlap(self.detect_queue[index], self.detect_queue[index + 1]) > 0.70):
                 return False
         return True
 
-    def __shape_validation(self, obj_mask):
+    def _shape_validation(self, obj_mask):
         num_labels, labels = cv2.connectedComponents(obj_mask.astype(np.uint8))
         for label in range(1, num_labels):
             component = labels == label
@@ -227,6 +223,34 @@ class ObjCamera(RealSenseCamera):
             if np.min(distances) < CONFIG.SHAPE_THRESHOLD:
                 return True
         return False
+
+    def _update_object_state(self, obj_mask):
+        object_detected = np.sum(obj_mask) > CONFIG.MIN_AREA_PIXELS
+        shape_ok = self._shape_validation(obj_mask)
+        should_save_debug = False
+
+        if object_detected:
+            self.detect_queue.append(obj_mask)
+            if len(self.detect_queue) > CONFIG.MAX_LEN:
+                self.detect_queue.pop(0)
+                if not self.obj_find:
+                    self.obj_find = self._there_is_obj() & shape_ok
+                should_save_debug = True
+        else:
+            if self.obj_find:
+                self.obj_find = False
+            self.detect_queue = []
+
+        return self.obj_find, should_save_debug
+
+
+class ObjCamera(RealSenseCamera, ObjectDetectionCamera):
+    def __init__(self, is_enter_node: bool, file_bag: str = None):
+        super().__init__(CONFIG.DEBUGGING, file_bag)
+        self.ROI = CONFIG.ROI_A if is_enter_node else CONFIG.ROI_B
+        self._init_object_detection()
+        time.sleep(3)
+        self.table_calibration()
 
     def find_object(self):
         try:
@@ -250,26 +274,120 @@ class ObjCamera(RealSenseCamera):
         depth = np.asanyarray(depth_frame.get_data())
         height_map = self._build_height_map_from_depth_frame(depth_frame)
         object_mask = (height_map > CONFIG.MIN_HEIGHT_THRESHOLD) & (height_map < CONFIG.MAX_HEIGHT_THRESHOLD)
-        object_detected = np.sum(object_mask) > CONFIG.MIN_AREA_PIXELS
-        shape_ok = self.__shape_validation(object_mask)
+        object_found, should_save_debug = self._update_object_state(object_mask)
 
-        if object_detected:
-            self.detect_queue.append(object_mask)
-            if len(self.detect_queue) > CONFIG.MAX_LEN:
-                self.detect_queue.pop(0)
-                if not self.obj_find:
-                    self.obj_find = self.__there_is_obj() & shape_ok
-                if CONFIG.DEBUGGING:
-                    _save_debug_artifact(depth, "_not_right_shape", "debug_shape")
-                    if color_frame:
-                        color = np.asanyarray(color_frame.get_data())
-                        _save_debug_artifact(color, "_shape", "debug_shape_img")
+        if CONFIG.DEBUGGING and should_save_debug:
+            _save_debug_artifact(depth, "_not_right_shape", "debug_shape")
+            if color_frame:
+                color = np.asanyarray(color_frame.get_data())
+                _save_debug_artifact(color, "_shape", "debug_shape_img")
+
+        return object_found, depth, object_mask
+
+
+class ZEDObjCamera(ObjectDetectionCamera):
+    def __init__(self, is_enter_node: bool, file_bag: str = None):
+        import pyzed.sl as sl
+
+        self.sl = sl
+        self.file_bag = file_bag
+        self.zed = None
+        self.runtime_params = self.sl.RuntimeParameters()
+        self.ROI = CONFIG.ROI_A if is_enter_node else CONFIG.ROI_B
+        self.plane = None
+        self.roi_mask = None
+        self.h = None
+        self.w = None
+        self._init_object_detection()
+        self._open_camera()
+        self.table_calibration()
+
+    def __del__(self):
+        if getattr(self, "zed", None) is not None:
+            self.zed.close()
+
+    def _build_init_params(self):
+        init_params = self.sl.InitParameters()
+        if self.file_bag is not None:
+            init_params.set_from_svo_file(self.file_bag)
         else:
-            if self.obj_find:
-                self.obj_find = False
-            self.detect_queue = []
+            init_params.depth_mode = self.sl.DEPTH_MODE.NEURAL
+            init_params.coordinate_units = self.sl.UNIT.METER
+            init_params.sdk_verbose = 1
+        return init_params
 
-        return self.obj_find, depth, object_mask
+    def _open_camera(self):
+        if self.zed is not None:
+            try:
+                self.zed.close()
+            except Exception:
+                pass
+
+        self.zed = self.sl.Camera()
+        error_code = self.zed.open(self._build_init_params())
+        if error_code != self.sl.ERROR_CODE.SUCCESS:
+            raise RuntimeError(f"Failure in opening ZED object camera ({error_code})")
+
+    def _grab_frame(self):
+        last_error = None
+        for attempt in range(CONFIG.ZED_GRAB_RETRY_COUNT):
+            error_code = self.zed.grab(self.runtime_params)
+            if error_code == self.sl.ERROR_CODE.SUCCESS:
+                if attempt > 0:
+                    print_log("ZED object camera grab recovered")
+                return
+            last_error = error_code
+            time.sleep(CONFIG.ZED_GRAB_RETRY_DELAY)
+
+        print_log(f"ZED object camera grab failed repeatedly ({last_error}), reopening camera")
+        self._open_camera()
+        error_code = self.zed.grab(self.runtime_params)
+        if error_code != self.sl.ERROR_CODE.SUCCESS:
+            raise RuntimeError(f"ZED object camera grab unrecoverable ({error_code})")
+
+    def _grab_points(self):
+        self._grab_frame()
+        point_cloud = self.sl.Mat()
+        self.zed.retrieve_measure(point_cloud, self.sl.MEASURE.XYZ)
+        return np.asanyarray(point_cloud.get_data())[:, :, :3].copy()
+
+    def _build_roi_mask(self):
+        x0, y0, x1, y1 = self.ROI
+        if not (0 <= x0 < x1 <= self.w and 0 <= y0 < y1 <= self.h):
+            raise RuntimeError(
+                f"Invalid ZED object ROI {self.ROI} for camera resolution {self.w}x{self.h}"
+            )
+        self.roi_mask = np.zeros((self.h, self.w), dtype=bool)
+        self.roi_mask[y0:y1, x0:x1] = True
+
+    def table_calibration(self):
+        points = self._grab_points()
+        self.h, self.w, _ = points.shape
+        self._build_roi_mask()
+
+        roi_points = points[self.roi_mask]
+        roi_points = roi_points[np.isfinite(roi_points[:, 2])]
+        self.plane = _estimate_plane(roi_points)
+        if self.plane is None:
+            raise RuntimeError("Unable to estimate the table plane from the ZED object camera")
+        print_log(f"Piano stimato: {self.plane}")
+
+    def find_object(self):
+        points = self._grab_points()
+        height_map = _build_height_map(points, self.roi_mask, (self.h, self.w), self.plane)
+        object_mask = (height_map > CONFIG.MIN_HEIGHT_THRESHOLD) & (height_map < CONFIG.MAX_HEIGHT_THRESHOLD)
+        object_found, should_save_debug = self._update_object_state(object_mask)
+
+        image = None
+        if CONFIG.DEBUGGING:
+            image_mat = self.sl.Mat()
+            self.zed.retrieve_image(image_mat, self.sl.VIEW.LEFT)
+            image = np.asanyarray(image_mat.get_data())
+            if should_save_debug:
+                _save_debug_artifact(points[:, :, 2], "_not_right_shape", "debug_shape")
+                _save_debug_artifact(image, "_shape", "debug_shape_img")
+
+        return object_found, image, object_mask
 
 
 class BaseQrReader:

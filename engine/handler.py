@@ -6,7 +6,7 @@ import config as CONFIG
 from engine.event import Event
 from engine.runtime_utils import print_log
 from engine.runtime_utils import save_numpy_artifact
-from hardware.camera import ObjCamera, QrCamera, SharedQRState, ZEDQrCamera, SharedState
+from hardware.camera import ObjCamera, QrCamera, SharedQRState, ZEDObjCamera, ZEDQrCamera, SharedState
 from hardware.gpio import Button, Light
 
 
@@ -33,7 +33,10 @@ def ObjectDetectionHandler(stop_event, event_queue, node_id, event_type: str, wo
     assert event_type in OBJECT_EVENTS
 
     is_enter_node = node_id == "A"
-    camera = ObjCamera(is_enter_node, file_bag)
+    if CONFIG.IS_ZED:
+        camera = ZEDObjCamera(is_enter_node, file_bag)
+    else:
+        camera = ObjCamera(is_enter_node, file_bag)
 
     state = CONFIG.NO_OBJECT
     pending_since = None

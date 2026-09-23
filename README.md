@@ -8,8 +8,8 @@ See [context.md](context.md) for the complete technical description in Italian.
 
 | `node_id` | Station | Camera | Function |
 | --- | --- | --- | --- |
-| `A` | Incoming table | RealSense | Sends `ENTER_DETECT` |
-| `B` | Outgoing table | RealSense | Sends `EXIT_DETECT` and, when enabled, `BUTTON_PRESSED` |
+| `A` | Incoming table | RealSense D455 or ZED X Mini | Sends `ENTER_DETECT` |
+| `B` | Outgoing table | RealSense D455 or ZED X Mini | Sends `EXIT_DETECT` and, when enabled, `BUTTON_PRESSED` |
 | `C` | Environmental | ZED2 or RealSense | Reads the DataMatrix, synchronizes the tables, and publishes MQTT events |
 
 ## Prerequisites
@@ -30,7 +30,7 @@ Install the dependencies required by the configured hardware as well:
 | Condition | Dependency |
 | --- | --- |
 | RealSense camera | `pyrealsense2` |
-| ZED2 camera | ZED SDK and `pyzed.sl` |
+| ZED2 or ZED X Mini camera | ZED SDK and `pyzed.sl` |
 | DataMatrix decoding on node C | `pylibdmtx` and system `libdmtx` |
 | LED or button | `gpiod` |
 | HTTP receiver | `Flask` |
@@ -45,7 +45,7 @@ The program validates required dependencies at startup and exits if the configur
 
 ```python
 # Station camera
-IS_ZED = False               # True only on node C with a ZED2
+IS_ZED = False               # True on C with ZED2, or on A/B with ZED X Mini
 ARUCO_MODE = False           # True only when the ArUco placeholder is installed
 
 # Local peripherals
@@ -67,6 +67,19 @@ MQTT_PORT = 443
 ```
 
 Configure ROI values, depth thresholds, shape thresholds, and debounce values according to camera height, lighting, and the physical table. `TABLE_NODE_IPS` is mandatory on node `C`; the environmental node exits at startup if it is empty.
+
+### Tables with ZED X Mini
+
+For A or B with a ZED X Mini, set `IS_ZED=True`. The node uses the ZED SDK point cloud in metres and the same plane, height-map, shape and debounce algorithm used by the RealSense backend. It opens the camera at the native resolution selected by ZED SDK; it does not force the ZED2 resolution used by C.
+
+Set the existing ROI of the physical table in the configuration deployed to that station before starting it:
+
+```python
+ROI_A = (<x0>, <y0>, <x1>, <y1>)  # Node A
+ROI_B = (<x0>, <y0>, <x1>, <y1>)  # Node B
+```
+
+Coordinates must fall within the acquired native resolution. Because `config.py` is deployed per station, `ROI_A` and `ROI_B` contain the coordinates calibrated for the camera installed on that specific node, whether it is RealSense or ZED X Mini. Verify `PLANE_THRESHOLD`, height thresholds, `MIN_AREA_PIXELS` and the expected-shape set with the installed camera. ZED X Mini requires a compatible Jetson host, ZED Link capture hardware and ZED SDK 4.0 or later.
 
 ## Running
 
