@@ -17,11 +17,21 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _require_module(module_name: str) -> None:
-    importlib.import_module(module_name)
+def _require_module(module_name: str):
+    return importlib.import_module(module_name)
 
 
 def validate_runtime_dependencies(node_id: str) -> None:
+    if node_id in {"A", "B"} and CONFIG.IS_ZED and not CONFIG.ZED_ENV_HAS_DEPTH:
+        raise RuntimeError("ZED_ENV_HAS_DEPTH=False is supported only on node C")
+
+    if node_id == "C" and CONFIG.IS_ZED and not CONFIG.ZED_ENV_HAS_DEPTH:
+        if not CONFIG.ARUCO_MODE:
+            raise RuntimeError("ZED_ENV_HAS_DEPTH=False requires ARUCO_MODE=True")
+        cv2 = _require_module("cv2")
+        if not hasattr(cv2, "aruco"):
+            raise RuntimeError("ZED_ENV_HAS_DEPTH=False requires OpenCV ArUco support")
+
     if node_id in {"A", "B"}:
         if CONFIG.IS_ZED:
             _require_module("pyzed.sl")

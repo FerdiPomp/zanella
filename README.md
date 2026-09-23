@@ -10,7 +10,7 @@ See [context.md](context.md) for the complete technical description in Italian.
 | --- | --- | --- | --- |
 | `A` | Incoming table | RealSense D455 or ZED X Mini | Sends `ENTER_DETECT` |
 | `B` | Outgoing table | RealSense D455 or ZED X Mini | Sends `EXIT_DETECT` and, when enabled, `BUTTON_PRESSED` |
-| `C` | Environmental | ZED2 or RealSense | Reads the DataMatrix, synchronizes the tables, and publishes MQTT events |
+| `C` | Environmental | ZED2, ZED X One 4K, or RealSense | Reads the DataMatrix, synchronizes the tables, and publishes MQTT events |
 
 ## Prerequisites
 
@@ -30,7 +30,7 @@ Install the dependencies required by the configured hardware as well:
 | Condition | Dependency |
 | --- | --- |
 | RealSense camera | `pyrealsense2` |
-| ZED2 or ZED X Mini camera | ZED SDK and `pyzed.sl` |
+| ZED2, ZED X Mini, or ZED X One 4K camera | ZED SDK and `pyzed.sl` |
 | DataMatrix decoding on node C | `pylibdmtx` and system `libdmtx` |
 | LED or button | `gpiod` |
 | HTTP receiver | `Flask` |
@@ -45,8 +45,9 @@ The program validates required dependencies at startup and exits if the configur
 
 ```python
 # Station camera
-IS_ZED = False               # True on C with ZED2, or on A/B with ZED X Mini
-ARUCO_MODE = False           # True only when the ArUco placeholder is installed
+IS_ZED = False               # True on C with ZED2/ZED X One, or on A/B with ZED X Mini
+ZED_ENV_HAS_DEPTH = True     # C only: False for a monocular ZED X One 4K
+ARUCO_MODE = False           # Must be True on C when ZED_ENV_HAS_DEPTH is False
 
 # Local peripherals
 THERE_IS_LED = True          # Tables with an LED
@@ -87,7 +88,17 @@ ROI_B = (<x0>, <y0>, <x1>, <y1>)  # Node B
 
 Coordinates must fall within the acquired native resolution. Because `config.py` is deployed per station, `ROI_A` and `ROI_B` contain the coordinates calibrated for the camera installed on that specific node, whether it is RealSense or ZED X Mini. Verify `PLANE_THRESHOLD`, height thresholds, `MIN_AREA_PIXELS` and the expected-shape set with the installed camera. ZED X Mini requires a compatible Jetson host, ZED Link capture hardware and ZED SDK 4.0 or later.
 
-ZED One 4K is not currently supported as the environmental camera: node C requires depth for its occlusion logic and supports ZED2 or RealSense only.
+### Environmental ZED X One 4K
+
+Node C also supports a monocular ZED X One 4K without creating a separate camera backend. Configure its station-specific `config.py` as follows:
+
+```python
+IS_ZED = True
+ZED_ENV_HAS_DEPTH = False
+ARUCO_MODE = True
+```
+
+The camera opens with ZED depth disabled. No plane is calibrated or stored, and no point cloud is requested. With no DataMatrix, a visible ArUco placeholder means normal visibility and permits `QR_REMOVED`; if both the DataMatrix and ArUco are absent, the reader reports occlusion and leaves the QR FSM unchanged. This mode is rejected at startup unless OpenCV ArUco support is installed. `ZED_ENV_HAS_DEPTH=False` is valid only on node C.
 
 ## Running
 
@@ -131,7 +142,7 @@ The environmental station periodically retransmits the state to bring tables bac
 
 At the configured local time (00:00 by default), each node performs one local recovery cycle. It first logs an anomaly if its `work_state` is `true`, forces it to `false`, and logs and discards any pending items in its own persistent HTTP queue. HTTP loops remain active throughout; on node C, the existing periodic state synchronization therefore continues to send `false` to the tables.
 
-The node saves the camera's current table plane to `.runtime/table_plane_<node_id>.json`, closes the camera for `NIGHT_RECOVERY_DURATION_SECONDS` (15 minutes by default), then opens it again. Whenever a saved plane exists, it is reused without RANSAC; if the file is absent, the normal initial calibration is used instead. Detection and DataMatrix FSM state is reset locally without emitting a `QR_REMOVED` event. A process that starts or restarts during the 00:00--00:15 recovery window does not run a recovery retroactively.
+On depth cameras, the node saves the current table plane to `.runtime/table_plane_<node_id>.json`, closes the camera for `NIGHT_RECOVERY_DURATION_SECONDS` (15 minutes by default), then opens it again. Whenever a saved plane exists, it is reused without RANSAC; if the file is absent, the normal initial calibration is used instead. A ZED X One 4K uses no plane or point cloud. Detection and DataMatrix FSM state is reset locally without emitting a `QR_REMOVED` event. A process that starts or restarts during the 00:00--00:15 recovery window does not run a recovery retroactively.
 
 The schedule uses the station's local system clock: keep it synchronized and configured for the intended local time zone.
 

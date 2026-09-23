@@ -5,6 +5,7 @@
 
 #----------------Camera Parameters------------------#
 IS_ZED = False
+ZED_ENV_HAS_DEPTH = True
 ARUCO_MODE = False
 DEBUGGING = False
 

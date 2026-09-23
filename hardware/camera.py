@@ -503,8 +503,12 @@ class ZEDQrCamera(BaseQrReader):
         import pyzed.sl as sl
         from pylibdmtx.pylibdmtx import decode
 
+        if not CONFIG.ZED_ENV_HAS_DEPTH and not CONFIG.ARUCO_MODE:
+            raise RuntimeError("ZED_ENV_HAS_DEPTH=False requires ARUCO_MODE=True")
+
         self.sl = sl
         self.decode = decode
+        self.has_depth = CONFIG.ZED_ENV_HAS_DEPTH
         self.shared_qr_state = shared_qr_state
         self._last_qr = None
         self.file_bag = file_bag
@@ -516,6 +520,8 @@ class ZEDQrCamera(BaseQrReader):
         self.w = None
         time.sleep(1)
         self._open_camera()
+        if not self.has_depth:
+            return
         if plane is None:
             print_log("First table calibration")
             self.table_calibration()
@@ -537,9 +543,11 @@ class ZEDQrCamera(BaseQrReader):
         init_params = self.sl.InitParameters()
         if self.file_bag is not None:
             init_params.set_from_svo_file(self.file_bag)
+            if not self.has_depth:
+                init_params.depth_mode = self.sl.DEPTH_MODE.NONE
         else:
             init_params.camera_resolution = self.sl.RESOLUTION.HD2K
-            init_params.depth_mode = self.sl.DEPTH_MODE.NEURAL
+            init_params.depth_mode = self.sl.DEPTH_MODE.NEURAL if self.has_depth else self.sl.DEPTH_MODE.NONE
             init_params.coordinate_units = self.sl.UNIT.METER
             init_params.sdk_verbose = 1
         return init_params
@@ -582,6 +590,8 @@ class ZEDQrCamera(BaseQrReader):
             raise RuntimeError(f"ZED grab unrecoverable ({error_code})")
 
     def _grab_point_cloud(self):
+        if not self.has_depth:
+            raise RuntimeError("Depth is disabled for this ZED environmental camera")
         self._grab_frame()
         point_cloud = self.sl.Mat()
         self.zed.retrieve_measure(point_cloud, self.sl.MEASURE.XYZ)
@@ -629,15 +639,17 @@ class ZEDQrCamera(BaseQrReader):
 
     def read_qr(self):
         self._grab_frame()
-        point_cloud = self.sl.Mat()
         image = self.sl.Mat()
-        self.zed.retrieve_measure(point_cloud, self.sl.MEASURE.XYZ)
         self.zed.retrieve_image(image, self.sl.VIEW.LEFT)
 
-        points = np.asanyarray(point_cloud.get_data())[:, :, :3]
-        height_map = self._build_height_map_from_points(points)
-        object_mask = height_map > CONFIG.MIN_HEIGHT_THRESHOLD
-        occlusion = np.sum(object_mask) > CONFIG.OCCLUSION_THRESHOLD
+        occlusion = False
+        if self.has_depth:
+            point_cloud = self.sl.Mat()
+            self.zed.retrieve_measure(point_cloud, self.sl.MEASURE.XYZ)
+            points = np.asanyarray(point_cloud.get_data())[:, :, :3]
+            height_map = self._build_height_map_from_points(points)
+            object_mask = height_map > CONFIG.MIN_HEIGHT_THRESHOLD
+            occlusion = np.sum(object_mask) > CONFIG.OCCLUSION_THRESHOLD
 
         img = np.asanyarray(image.get_data())
         img_roi, _ = self._get_roi_image(img)
@@ -652,4 +664,6 @@ class ZEDQrCamera(BaseQrReader):
             return _decode_text(codes[0]), occlusion, img
         if codes and len(codes) > 1:
             return None, True, img
+        if not self.has_depth:
+            return None, not aruco, None
         return None, occlusion and (not aruco), None
