@@ -97,7 +97,7 @@ class SharedQRState:
             return self._qr, self._timestamp
 
     def get_prev(self):
-        with self.lock:
+        with self._lock:
             return self._prev_qr, self._prev_timestamp
 
 
