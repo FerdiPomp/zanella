@@ -22,7 +22,8 @@ class PersistentEventQueue:
     def contains_item_id(self, item_id: str) -> bool:
         if item_id is None:
             return False
-        return (self.spool_dir / f"{item_id}.json").exists()
+        with self._lock:
+            return (self.spool_dir / f"{item_id}.json").exists()
 
     def put(self, item, item_id: str = None):
         payload = self.serializer(item)
@@ -43,7 +44,8 @@ class PersistentEventQueue:
         return True
 
     def has_pending(self) -> bool:
-        return any(self.spool_dir.glob("*.json"))
+        with self._lock:
+            return any(self.spool_dir.glob("*.json"))
 
     def wait_for_item(self, timeout: float = 0.5) -> bool:
         if self.has_pending():
@@ -56,19 +58,31 @@ class PersistentEventQueue:
             return self.has_pending()
 
     def peek(self):
-        entries = self._list_entries()
-        if not entries:
-            return None, None
+        with self._lock:
+            entries = self._list_entries()
+            if not entries:
+                return None, None
 
-        path = entries[0]
-        with path.open("r", encoding="utf-8") as handle:
-            payload = json.load(handle)
-        return path, self.deserializer(payload)
+            path = entries[0]
+            with path.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            return path, self.deserializer(payload)
 
     def ack(self, token):
         if token is None:
             return
-        try:
-            token.unlink()
-        except FileNotFoundError:
-            pass
+        with self._lock:
+            try:
+                token.unlink()
+            except FileNotFoundError:
+                pass
+
+    def discard_all(self) -> int:
+        with self._lock:
+            entries = self._list_entries()
+            for path in entries:
+                try:
+                    path.unlink()
+                except FileNotFoundError:
+                    pass
+            return len(entries)

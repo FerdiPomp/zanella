@@ -64,6 +64,12 @@ WORK_STATE_SYNC_INTERVAL = 1
 ONLINE_SENDER_ENV = True
 BROKER_IP = "<broker>"
 MQTT_PORT = 443
+
+# Daily camera recovery on every node (local system time)
+NIGHT_RECOVERY_ENABLED = True
+NIGHT_RECOVERY_HOUR = 0
+NIGHT_RECOVERY_MINUTE = 0
+NIGHT_RECOVERY_DURATION_SECONDS = 15 * 60
 ```
 
 Configure ROI values, depth thresholds, shape thresholds, and debounce values according to camera height, lighting, and the physical table. `TABLE_NODE_IPS` is mandatory on node `C`; the environmental node exits at startup if it is empty.
@@ -80,6 +86,8 @@ ROI_B = (<x0>, <y0>, <x1>, <y1>)  # Node B
 ```
 
 Coordinates must fall within the acquired native resolution. Because `config.py` is deployed per station, `ROI_A` and `ROI_B` contain the coordinates calibrated for the camera installed on that specific node, whether it is RealSense or ZED X Mini. Verify `PLANE_THRESHOLD`, height thresholds, `MIN_AREA_PIXELS` and the expected-shape set with the installed camera. ZED X Mini requires a compatible Jetson host, ZED Link capture hardware and ZED SDK 4.0 or later.
+
+ZED One 4K is not currently supported as the environmental camera: node C requires depth for its occlusion logic and supports ZED2 or RealSense only.
 
 ## Running
 
@@ -118,6 +126,14 @@ For playback from a camera-backend-supported file, add `--file_bag <file_path>`.
 5. When DataMatrix removal is confirmed, `C` sends `work_state=false` and generates `QR_REMOVED`.
 
 The environmental station periodically retransmits the state to bring tables back in sync after a reboot or network interruption.
+
+## Daily Camera Recovery
+
+At the configured local time (00:00 by default), each node performs one local recovery cycle. It first logs an anomaly if its `work_state` is `true`, forces it to `false`, and logs and discards any pending items in its own persistent HTTP queue. HTTP loops remain active throughout; on node C, the existing periodic state synchronization therefore continues to send `false` to the tables.
+
+The node saves the camera's current table plane to `.runtime/table_plane_<node_id>.json`, closes the camera for `NIGHT_RECOVERY_DURATION_SECONDS` (15 minutes by default), then opens it again. Whenever a saved plane exists, it is reused without RANSAC; if the file is absent, the normal initial calibration is used instead. Detection and DataMatrix FSM state is reset locally without emitting a `QR_REMOVED` event. A process that starts or restarts during the 00:00--00:15 recovery window does not run a recovery retroactively.
+
+The schedule uses the station's local system clock: keep it synchronized and configured for the intended local time zone.
 
 ## Event Transport
 

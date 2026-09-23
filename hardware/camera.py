@@ -139,8 +139,15 @@ class RealSenseCamera:
         self.w = None
 
     def __del__(self):
+        self.close()
+
+    def close(self):
         if getattr(self, "pipeline", None) is not None:
-            self.pipeline.stop()
+            try:
+                self.pipeline.stop()
+            except Exception:
+                pass
+            self.pipeline = None
 
     def _wait_for_frames(self):
         return self.pipeline.wait_for_frames()
@@ -185,6 +192,17 @@ class RealSenseCamera:
                 return None
 
         self._calibrate_plane_from_depth_frame(depth_frame)
+
+    def load_plane(self, plane):
+        frames = self._wait_for_frames()
+        depth_frame = frames.get_depth_frame()
+        if not depth_frame:
+            raise RuntimeError("No depth frame while loading table plane")
+
+        depth = np.asanyarray(depth_frame.get_data())
+        self.h, self.w = depth.shape
+        self._build_roi_mask()
+        self.plane = np.asarray(plane, dtype=np.float64)
 
     def _build_height_map_from_depth_frame(self, depth_frame):
         points = self._depth_to_points(depth_frame).reshape(self.h, self.w, 3)
@@ -245,12 +263,15 @@ class ObjectDetectionCamera:
 
 
 class ObjCamera(RealSenseCamera, ObjectDetectionCamera):
-    def __init__(self, is_enter_node: bool, file_bag: str = None):
+    def __init__(self, is_enter_node: bool, file_bag: str = None, plane=None):
         super().__init__(CONFIG.DEBUGGING, file_bag)
         self.ROI = CONFIG.ROI_A if is_enter_node else CONFIG.ROI_B
         self._init_object_detection()
         time.sleep(3)
-        self.table_calibration()
+        if plane is None:
+            self.table_calibration()
+        else:
+            self.load_plane(plane)
 
     def find_object(self):
         try:
@@ -286,7 +307,7 @@ class ObjCamera(RealSenseCamera, ObjectDetectionCamera):
 
 
 class ZEDObjCamera(ObjectDetectionCamera):
-    def __init__(self, is_enter_node: bool, file_bag: str = None):
+    def __init__(self, is_enter_node: bool, file_bag: str = None, plane=None):
         import pyzed.sl as sl
 
         self.sl = sl
@@ -300,11 +321,21 @@ class ZEDObjCamera(ObjectDetectionCamera):
         self.w = None
         self._init_object_detection()
         self._open_camera()
-        self.table_calibration()
+        if plane is None:
+            self.table_calibration()
+        else:
+            self.load_plane(plane)
 
     def __del__(self):
+        self.close()
+
+    def close(self):
         if getattr(self, "zed", None) is not None:
-            self.zed.close()
+            try:
+                self.zed.close()
+            except Exception:
+                pass
+            self.zed = None
 
     def _build_init_params(self):
         init_params = self.sl.InitParameters()
@@ -372,6 +403,12 @@ class ZEDObjCamera(ObjectDetectionCamera):
             raise RuntimeError("Unable to estimate the table plane from the ZED object camera")
         print_log(f"Piano stimato: {self.plane}")
 
+    def load_plane(self, plane):
+        points = self._grab_points()
+        self.h, self.w, _ = points.shape
+        self._build_roi_mask()
+        self.plane = np.asarray(plane, dtype=np.float64)
+
     def find_object(self):
         points = self._grab_points()
         height_map = _build_height_map(points, self.roi_mask, (self.h, self.w), self.plane)
@@ -405,7 +442,7 @@ class BaseQrReader:
 
 
 class QrCamera(RealSenseCamera, BaseQrReader):
-    def __init__(self, shared_qr_state: SharedQRState, file_bag: str = None):
+    def __init__(self, shared_qr_state: SharedQRState, file_bag: str = None, plane=None):
         from pylibdmtx.pylibdmtx import decode
 
         self.decode = decode
@@ -413,7 +450,10 @@ class QrCamera(RealSenseCamera, BaseQrReader):
         self.ROI = CONFIG.ROI_QR
         self.shared_qr_state = shared_qr_state
         self._last_qr = None
-        self.table_calibration()
+        if plane is None:
+            self.table_calibration()
+        else:
+            self.load_plane(plane)
 
     def find_occlusion(self):
         depth_frame = self._wait_for_frames().get_depth_frame()
@@ -459,7 +499,7 @@ class QrCamera(RealSenseCamera, BaseQrReader):
 
 
 class ZEDQrCamera(BaseQrReader):
-    def __init__(self, shared_qr_state: SharedQRState, file_bag: str = None):
+    def __init__(self, shared_qr_state: SharedQRState, file_bag: str = None, plane=None):
         import pyzed.sl as sl
         from pylibdmtx.pylibdmtx import decode
 
@@ -470,18 +510,28 @@ class ZEDQrCamera(BaseQrReader):
         self.file_bag = file_bag
         self.zed = None
         self.runtime_params = self.sl.RuntimeParameters()
-        print_log("First table calibration")
         self.plane = None
         self.roi_mask = None
         self.h = None
         self.w = None
         time.sleep(1)
         self._open_camera()
-        self.table_calibration()
+        if plane is None:
+            print_log("First table calibration")
+            self.table_calibration()
+        else:
+            self.load_plane(plane)
 
     def __del__(self):
+        self.close()
+
+    def close(self):
         if getattr(self, "zed", None) is not None:
-            self.zed.close()
+            try:
+                self.zed.close()
+            except Exception:
+                pass
+            self.zed = None
 
     def _build_init_params(self):
         init_params = self.sl.InitParameters()
@@ -555,6 +605,13 @@ class ZEDQrCamera(BaseQrReader):
     def table_calibration(self):
         point_cloud = self._grab_point_cloud()
         self._calibrate_plane_from_point_cloud(point_cloud)
+
+    def load_plane(self, plane):
+        point_cloud = self._grab_point_cloud()
+        depth = np.asanyarray(point_cloud.get_data())[:, :, :3]
+        self.h, self.w, _ = depth.shape
+        self._build_roi_mask()
+        self.plane = np.asarray(plane, dtype=np.float64)
 
     def _build_height_map_from_points(self, points):
         return _build_height_map(points, self.roi_mask, (self.h, self.w), self.plane)

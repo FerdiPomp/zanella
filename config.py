@@ -82,6 +82,10 @@ QR_MIN_CHANGE_TIME = 5
 ONLINE_SENDER = True
 ONLINE_RECIEVER = True
 ONLINE_SENDER_ENV = False
+NIGHT_RECOVERY_ENABLED = True
+NIGHT_RECOVERY_HOUR = 0
+NIGHT_RECOVERY_MINUTE = 0
+NIGHT_RECOVERY_DURATION_SECONDS = 15 * 60
 #----------------End Node Parameters------------------#
 
 #----------------Network Parameters------------------#
