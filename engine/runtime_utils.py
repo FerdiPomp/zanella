@@ -1,8 +1,10 @@
 from datetime import datetime
 from pathlib import Path
+import fcntl
 
 import cv2
 import numpy as np
+import configuration as CONFIG
 
 
 def current_day_stamp() -> str:
@@ -27,6 +29,31 @@ def describe_for_log(value) -> str:
     return str(value)
 
 
+def runtime_path(*parts) -> Path:
+    return Path(CONFIG.RUNTIME_ROOT).joinpath(*parts)
+
+
+class RuntimeLease:
+    def __init__(self):
+        self.path = runtime_path(".runtime", ".owner.lock")
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.handle = self.path.open("a+")
+        try:
+            fcntl.flock(self.handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            self.handle.close()
+            raise RuntimeError(f"Runtime directory is already in use: {self.path.parent}") from error
+        except OSError:
+            self.handle.close()
+            raise
+
+    def close(self):
+        if self.handle is not None:
+            fcntl.flock(self.handle, fcntl.LOCK_UN)
+            self.handle.close()
+            self.handle = None
+
+
 def ensure_dir(dir_name: str) -> Path:
     path = Path(dir_name)
     path.mkdir(parents=True, exist_ok=True)
@@ -34,7 +61,7 @@ def ensure_dir(dir_name: str) -> Path:
 
 
 def build_dated_path(dir_name: str, file_name: str, suffix: str) -> Path:
-    directory = ensure_dir(dir_name)
+    directory = ensure_dir(runtime_path(dir_name))
     base_name = f"{current_day_stamp()}{file_name}"
     candidate = directory / f"{base_name}{suffix}"
     index = 1

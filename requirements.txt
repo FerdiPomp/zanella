@@ -6,3 +6,4 @@ pygame
 Flask
 paho-mqtt
 requests
+PyYAML

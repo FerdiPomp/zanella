@@ -1,4 +1,4 @@
-import config as CONFIG
+import configuration as CONFIG
 
 
 GPIO_CHIP = "/dev/gpiochip0"
@@ -41,8 +41,12 @@ class Light:
         )
 
     def __del__(self):
-        if hasattr(self, "line_request"):
+        self.close()
+
+    def close(self):
+        if getattr(self, "line_request", None) is not None:
             self.line_request.release()
+            self.line_request = None
 
     def on(self):
         self.line_request.set_value(self.led_pin, self.value.ACTIVE)

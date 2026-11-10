@@ -1,15 +1,14 @@
 import json
 import os
 from datetime import datetime, timedelta
-from pathlib import Path
 
-import config as CONFIG
-from engine.runtime_utils import print_log
+import configuration as CONFIG
+from engine.runtime_utils import print_log, runtime_path
 
 
 class PlaneStore:
     def __init__(self, node_id: str):
-        self.path = Path(f".runtime/table_plane_{node_id}.json")
+        self.path = runtime_path(".runtime", f"table_plane_{node_id}.json")
 
     def load(self):
         try:

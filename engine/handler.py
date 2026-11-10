@@ -2,7 +2,7 @@ import queue
 import numpy as np
 import time
 
-import config as CONFIG
+import configuration as CONFIG
 from engine.event import Event
 from engine.recovery import NightRecovery
 from engine.runtime_utils import print_log
@@ -14,9 +14,9 @@ from hardware.gpio import Button, Light
 OBJECT_EVENTS = ["ENTER_DETECT", "EXIT_DETECT"]
 
 
-def _send_led_command(led_queue, command: str) -> None:
+def _send_led_command(led_queue, source: str, command: str) -> None:
     if led_queue is not None:
-        led_queue.put(command)
+        led_queue.put((source, command))
 
 
 def _queue_event(event_queue, node_id, event_type: str, timestamp: float, qr=None) -> None:
@@ -52,7 +52,7 @@ def ObjectDetectionHandler(stop_event, event_queue, node_id, event_type: str, wo
     try:
         while not stop_event.is_set():
             if recovery.should_run():
-                _send_led_command(led_queue, "off")
+                _send_led_command(led_queue, "object", "off")
                 recovery.start(camera)
                 camera = None
                 state = CONFIG.NO_OBJECT
@@ -75,10 +75,10 @@ def ObjectDetectionHandler(stop_event, event_queue, node_id, event_type: str, wo
                         record = True
                         state = CONFIG.OBJECT_PRESENT
                         if work_state.get():
-                            _send_led_command(led_queue, "on")
+                            _send_led_command(led_queue, "object", "on")
                             _queue_event(event_queue, node_id, event_type, now)
                         else:
-                            _send_led_command(led_queue, "blink")
+                            _send_led_command(led_queue, "object", "blink")
                 elif state == CONFIG.OBJECT_PRESENT:
                     if not object_present:
                         if pending_since is None:
@@ -86,7 +86,7 @@ def ObjectDetectionHandler(stop_event, event_queue, node_id, event_type: str, wo
                         elif now - pending_since >= CONFIG.OBJ_MIN_OFF_TIME:
                             state = CONFIG.NO_OBJECT
                             record = False
-                            _send_led_command(led_queue, "off")
+                            _send_led_command(led_queue, "object", "off")
                             pending_since = None
                     else:
                         pending_since = None
@@ -96,6 +96,7 @@ def ObjectDetectionHandler(stop_event, event_queue, node_id, event_type: str, wo
                     video_seq.append(img)
                 video_seq = _save_sequence_if_ready(record, video_seq, "_obj_camera", "recorded")
     finally:
+        _send_led_command(led_queue, "object", "off")
         if camera is not None:
             camera.close()
 
@@ -105,34 +106,37 @@ def ButtonPressHandler(stop_event, event_queue, node_id, work_state: SharedState
     state = CONFIG.NO_PRESS
     pending_since = None
 
-    while not stop_event.is_set():
-        press = button.pressed()
-        now = time.time()
+    try:
+        while not stop_event.is_set():
+            press = button.pressed()
+            now = time.time()
 
-        if state == CONFIG.NO_PRESS:
-            if press:
-                if pending_since is None:
-                    pending_since = now
-                elif now - pending_since >= CONFIG.BUT_MIN_ON_TIME:
-                    state = CONFIG.PRESSED
+            if state == CONFIG.NO_PRESS:
+                if press:
+                    if pending_since is None:
+                        pending_since = now
+                    elif now - pending_since >= CONFIG.BUT_MIN_ON_TIME:
+                        state = CONFIG.PRESSED
+                        pending_since = None
+                        if work_state.get():
+                            _queue_event(event_queue, node_id, "BUTTON_PRESSED", now)
+                            _send_led_command(led_queue, "button", "on")
+                        else:
+                            _send_led_command(led_queue, "button", "blink")
+                else:
                     pending_since = None
-                    if work_state.get():
-                        _queue_event(event_queue, node_id, "BUTTON_PRESSED", now)
-                        _send_led_command(led_queue, "on")
-                    else:
-                        _send_led_command(led_queue, "blink")
-            else:
-                pending_since = None
-        elif state == CONFIG.PRESSED:
-            if not press:
-                if pending_since is None:
-                    pending_since = now
-                elif now - pending_since >= CONFIG.BUT_MIN_OFF_TIME:
-                    state = CONFIG.NO_PRESS
+            elif state == CONFIG.PRESSED:
+                if not press:
+                    if pending_since is None:
+                        pending_since = now
+                    elif now - pending_since >= CONFIG.BUT_MIN_OFF_TIME:
+                        state = CONFIG.NO_PRESS
+                        pending_since = None
+                        _send_led_command(led_queue, "button", "off")
+                else:
                     pending_since = None
-                    _send_led_command(led_queue, "off")
-            else:
-                pending_since = None
+    finally:
+        _send_led_command(led_queue, "button", "off")
 
 
 def _build_qr_camera(shared_qr_state: SharedQRState, file_bag: str = None, plane=None):
@@ -249,25 +253,21 @@ def QrHandler(stop_event, event_queue, node_id, shared_qr_state: SharedQRState, 
 
 
 def LightHandler(stop_event, led_queue):
+    from engine.led import LedOutput, LedState
+
     light = Light()
+    state = LedState()
+    output = LedOutput(light)
     try:
         while not stop_event.is_set():
             try:
-                command = led_queue.get(timeout=0.1)
+                source, command = led_queue.get(timeout=0.1)
+                state.set(source, command)
             except queue.Empty:
-                continue
-
-            if command == "on":
-                light.on()
-            elif command == "off":
-                light.off()
-
-            if command == "blink":
-                for i in range(15):
-                    light.on()
-                    time.sleep(0.3)
-                    light.off()
-                    time.sleep(0.3)
-        light.off()
+                pass
+            output.apply(state.mode())
     finally:
-        del light
+        try:
+            light.off()
+        finally:
+            light.close()

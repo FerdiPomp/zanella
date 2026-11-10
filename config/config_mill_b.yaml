@@ -1,0 +1,104 @@
+#----------------Node Parameters------------------#
+#----------------End Node Parameters------------------#
+
+
+#----------------Camera Parameters------------------#
+IS_ZED: false
+ZED_ENV_HAS_DEPTH: false
+ARUCO_MODE: false
+DEBUGGING: true
+
+ROI: [367, 38, 908, 420] # x0, y0, x1, y1
+#ROI for enter obj detection camera
+ROI_A: [390, 30, 930, 420] # x0, y0, x1, y1
+#ROI for exit obj detection camera
+ROI_B: [390, 30, 930, 420] # x0, y0, x1, y1
+#ROI for env camera
+ROI_QR: [560, 250, 890, 500] # x0, y0, x1, y1
+
+ROI_QR_ZED: [513, 386, 696, 616]
+
+#Threshold for plane calibration
+PLANE_THRESHOLD: 0.005 #5mm
+
+#min sigma for table ri-calibration
+THRESH_STD: 0.1
+
+#Max distance in shape validation
+SHAPE_THRESHOLD: 3
+
+#Max-Min heigh from plane in object detection
+MIN_HEIGHT_THRESHOLD: 0.05
+MAX_HEIGHT_THRESHOLD: 0.30
+
+#Min occupancy area (in px) for object detection
+MIN_AREA_PIXELS: 5000
+#Max occupancy area for no object detection
+MAX_OCCUPATION: 100
+
+#Number of frame for debouncing object detection
+MAX_LEN: 3
+
+#Max number of pixel for detect occlusion on qr reading
+OCCLUSION_THRESHOLD: 1000
+
+ZED_GRAB_RETRY_COUNT: 10
+ZED_GRAB_RETRY_DELAY: 0.5
+CAMERA_SERIAL_NUMBER: "" # Live camera serial; quote it to preserve leading zeroes
+#----------------End Camera Parameters------------------#
+
+#----------------GPIO Parameters------------------#
+
+BUTTON_PIN: 85
+LED_PIN: 106
+#----------------End GPIO Parameters------------------#
+
+#----------------Handler Parameters------------------#
+THERE_IS_LED: true
+LED_SOCKET_PATH: "" # Absolute path shared by A, B, and the LED controller; empty uses the local LED
+THERE_IS_BUTTON: true
+IS_JETSON: false
+
+#States for FSM.
+NO_OBJECT: 0
+OBJECT_PRESENT: 1
+
+NO_PRESS: 0
+PRESSED: 1
+
+NO_QR: 0
+QR: 1
+
+#Debouncing times for the various FSM (seconds)
+OBJ_MIN_OFF_TIME: 10
+
+BUT_MIN_ON_TIME: 0.5
+BUT_MIN_OFF_TIME: 2
+
+QR_MIN_ON_TIME: 1
+QR_MIN_OFF_TIME: 3
+QR_MIN_CHANGE_TIME: 5
+#----------------End Handler Parameters------------------#
+
+#----------------Node Parameters------------------#
+ONLINE_SENDER: true
+ONLINE_RECIEVER: true
+ONLINE_SENDER_ENV: false
+NIGHT_RECOVERY_ENABLED: true
+NIGHT_RECOVERY_HOUR: 0
+NIGHT_RECOVERY_MINUTE: 15
+NIGHT_RECOVERY_DURATION_SECONDS: 900
+#----------------End Node Parameters------------------#
+
+#----------------Network Parameters------------------#
+SERVER_URL: "192.168.0.233"
+SERVER_PORT: 9000
+WORK_STATE_PORT: 9000 # A/B local receiver; use different ports on one ZED Box
+TABLE_NODE_IPS: []
+TABLE_NODE_ENDPOINTS: {} # C: {A: {host: "...", port: 9101}, B: {host: "...", port: 9102}}
+WORK_STATE_SYNC_INTERVAL: 10
+BROKER_IP: "mqtt.192.168.0.60.nip.io"
+MQTT_PORT: 443
+#----------------End Network Parameters------------------#
+
+RUNTIME_ROOT: "." # Separate absolute directories for A/B on one ZED Box

@@ -1,11 +1,10 @@
 import json
 import threading
 import time
-from pathlib import Path
 
-import config as CONFIG
+import configuration as CONFIG
 from engine.event import Event
-from engine.runtime_utils import print_log
+from engine.runtime_utils import print_log, runtime_path
 
 HTTP_EVENT_ID_HEADER = "Event-ID"
 
@@ -111,7 +110,7 @@ class HTTPReceiver:
         self.server = None
         self.thread = None
         self.stop_event = threading.Event()
-        self.seen_dir = Path(".runtime/http_seen")
+        self.seen_dir = runtime_path(".runtime", "http_seen")
         self.seen_dir.mkdir(parents=True, exist_ok=True)
 
     def _is_duplicate(self, delivery_id: str) -> bool:
@@ -153,16 +152,10 @@ class HTTPReceiver:
     def _serve_forever(self):
         while not self.stop_event.is_set():
             try:
-                self.server = self.make_server(self.host, self.port, self.app, threaded=True)
-                if self.stop_event.is_set():
-                    self.server.server_close()
-                    return
-                self.server.serve_forever()
-            except OSError:
-                time.sleep(1)
+                self.server.handle_request()
             except Exception as error:
                 print_log(f"HTTPReceiver failure: {error}")
-                time.sleep(1)
+                return
 
     def start(self, event_queue=None, work_state=None):
         """
@@ -170,6 +163,11 @@ class HTTPReceiver:
         e riempie la queue con Event.
         """
         self._register_routes(event_queue, work_state)
+        try:
+            self.server = self.make_server(self.host, self.port, self.app, threaded=True)
+        except (OSError, SystemExit) as error:
+            raise RuntimeError(f"Unable to bind HTTP receiver on {self.host}:{self.port}: {error}") from error
+        self.server.timeout = 0.2
         self.thread = threading.Thread(
             target=self._serve_forever,
             daemon=True,
@@ -178,8 +176,7 @@ class HTTPReceiver:
 
     def stop(self):
         self.stop_event.set()
-        if self.server is not None:
-            self.server.shutdown()
-            self.server.server_close()
         if self.thread is not None:
             self.thread.join()
+        if self.server is not None:
+            self.server.server_close()

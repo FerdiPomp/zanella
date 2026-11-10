@@ -5,7 +5,7 @@ import time
 
 from sklearn.linear_model import LinearRegression, RANSACRegressor
 
-import config as CONFIG
+import configuration as CONFIG
 from engine.runtime_utils import print_log, save_jpg_artifact, save_numpy_artifact
 
 
@@ -126,6 +126,8 @@ class RealSenseCamera:
         if file_bag is not None:
             self.config.enable_device_from_file(file_bag, repeat_playback=False)
         else:
+            if CONFIG.CAMERA_SERIAL_NUMBER:
+                self.config.enable_device(CONFIG.CAMERA_SERIAL_NUMBER)
             self.config.enable_stream(self.rs.stream.depth, 1280, 720, self.rs.format.z16, 5)
             if rgb:
                 self.config.enable_stream(self.rs.stream.color, 1280, 720, self.rs.format.bgr8, 5)
@@ -342,6 +344,8 @@ class ZEDObjCamera(ObjectDetectionCamera):
         if self.file_bag is not None:
             init_params.set_from_svo_file(self.file_bag)
         else:
+            if CONFIG.CAMERA_SERIAL_NUMBER:
+                init_params.set_from_serial_number(int(CONFIG.CAMERA_SERIAL_NUMBER))
             init_params.depth_mode = self.sl.DEPTH_MODE.NEURAL
             init_params.coordinate_units = self.sl.UNIT.METER
             init_params.sdk_verbose = 1
@@ -557,6 +561,8 @@ class ZEDQrCamera(BaseQrReader):
         if self.file_bag is not None:
             init_params.set_from_svo_file(self.file_bag)
         else:
+            if CONFIG.CAMERA_SERIAL_NUMBER:
+                init_params.set_from_serial_number(int(CONFIG.CAMERA_SERIAL_NUMBER))
             init_params.camera_resolution = self.sl.RESOLUTION.HD2K
             init_params.depth_mode = self.sl.DEPTH_MODE.NEURAL
             init_params.coordinate_units = self.sl.UNIT.METER

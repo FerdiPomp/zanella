@@ -2,12 +2,13 @@ import threading
 from queue import Queue
 import time
 
-import config as CONFIG
+import configuration as CONFIG
 from engine.event import EVENTS, ITEMS, WORKSPACES, Event, EventXLayer
 from engine.handler import ButtonPressHandler, LightHandler, ObjectDetectionHandler, QrHandler
+from engine.led import SharedLedHandler
 from engine.network import HTTPReceiver, HTTPSender, MQTTSender
 from engine.persistence import PersistentEventQueue
-from engine.runtime_utils import print_log
+from engine.runtime_utils import print_log, runtime_path
 from hardware.camera import SharedQRState, SharedState
 
 
@@ -49,15 +50,16 @@ class BaseNode:
         if receiver is not None:
             receiver.stop()
         for thread in self.threads:
-            thread.join()
+            if thread.ident is not None:
+                thread.join()
 
 
 class EdgeNode(BaseNode):
     def __init__(self, node_id):
-        super().__init__(node_id, queue_dir=f".runtime/http_out_{node_id}")
+        super().__init__(node_id, queue_dir=runtime_path(".runtime", f"http_out_{node_id}"))
         self.sender = HTTPSender() if CONFIG.ONLINE_SENDER else None
-        self.receiver = HTTPReceiver(host="0.0.0.0")
-        self.led_queue = Queue()
+        self.receiver = HTTPReceiver(host="0.0.0.0", port=CONFIG.WORK_STATE_PORT)
+        self.led_queue = Queue() if CONFIG.THERE_IS_LED else None
         self.work_state = SharedState()
 
     def _network_loop(self):
@@ -96,8 +98,9 @@ class EdgeNode(BaseNode):
         if CONFIG.THERE_IS_LED:
             self.threads.append(
                 threading.Thread(
-                    target=LightHandler,
-                    args=(self.stop_event, self.led_queue),
+                    target=SharedLedHandler if CONFIG.LED_SOCKET_PATH else LightHandler,
+                    args=(self.stop_event, self.led_queue, self.node_id, CONFIG.LED_SOCKET_PATH)
+                    if CONFIG.LED_SOCKET_PATH else (self.stop_event, self.led_queue),
                     daemon=False,
                 )
             )
@@ -137,17 +140,23 @@ class ExitNode(EdgeNode):
 
 class EnvNode(BaseNode):
     def __init__(self, node_id, workspace: str, broker_psw, topic):
-        super().__init__(node_id, queue_dir=f".runtime/http_in_{node_id}")
+        super().__init__(node_id, queue_dir=runtime_path(".runtime", f"http_in_{node_id}"))
         self.sender = MQTTSender(broker_psw, topic) if CONFIG.ONLINE_SENDER_ENV else None
         self.receiver = HTTPReceiver() if CONFIG.ONLINE_RECIEVER else None
         self.shared_qr_state = SharedQRState()
         self.work_state = SharedState()
         self.work_state_changed = threading.Event()
-        if not CONFIG.TABLE_NODE_IPS or not all(CONFIG.TABLE_NODE_IPS):
-            raise RuntimeError("TABLE_NODE_IPS must contain the IP addresses of the table stations")
+        if not CONFIG.TABLE_NODE_ENDPOINTS and (not CONFIG.TABLE_NODE_IPS or not all(CONFIG.TABLE_NODE_IPS)):
+            raise RuntimeError("TABLE_NODE_ENDPOINTS or TABLE_NODE_IPS must contain the table stations")
         if CONFIG.WORK_STATE_SYNC_INTERVAL <= 0:
             raise RuntimeError("WORK_STATE_SYNC_INTERVAL must be greater than zero")
-        self.work_state_senders = [HTTPSender(ip, endpoint="/work_state") for ip in CONFIG.TABLE_NODE_IPS]
+        if CONFIG.TABLE_NODE_ENDPOINTS:
+            self.work_state_senders = [
+                HTTPSender(CONFIG.TABLE_NODE_ENDPOINTS[node_id]["host"], port=CONFIG.TABLE_NODE_ENDPOINTS[node_id]["port"], endpoint="/work_state")
+                for node_id in ("A", "B")
+            ]
+        else:
+            self.work_state_senders = [HTTPSender(ip, endpoint="/work_state") for ip in CONFIG.TABLE_NODE_IPS]
         self.workspace = workspace
 
     def _set_work_state(self, value: bool):
