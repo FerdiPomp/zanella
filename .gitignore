@@ -13,3 +13,5 @@ run.sh
 calibration.svo2
 __pycache__/
 context.md
+debug_shape/
+debug_shape_img/

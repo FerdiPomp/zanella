@@ -233,4 +233,16 @@ The schedule uses the station's local system clock: keep it synchronized and con
 
 With `DEBUGGING=True`, individual RGB images are saved as JPEG files, detection sequences are saved as `.npy` files, and file/log names use the `YYYYMMDD_HHMMSS` format.
 
+For RealSense table nodes, `DEBUGGING=True` also writes one JSON record per frameset processed by the object detector to `<RUNTIME_ROOT>/.runtime/realsense_frames_YYYYMMDD.jsonl`. Each `frame` record contains the local acquisition time with millisecond precision and UTC offset, a monotonic host clock value, the wait duration, and each available depth/color frame's number, SDK timestamp (milliseconds), timestamp domain, and SHA-256 digest of its raw pixels. `same_depth_frame`, `same_depth_payload`, `color_advanced`, and `depth_repeat_count` compare each stream with its own preceding frame; they do not change object detection. A `camera_open` record identifies the node, session, available device details (serial, firmware, USB type), and whether playback is in use. `wait_error`, `pipeline_restarted`, `pipeline_restart_error`, `artifacts_saved`, and `camera_close` records mark the other relevant events. The artifact record includes the exact saved `.npy` and `.jpg` paths and the corresponding `frame_index`. A warning is printed when the same depth frame number and timestamp are observed for five consecutive acquisitions. Trace writes are flushed after every record; monitor available disk space while debugging.
+
+SDK timestamps from different timestamp domains must not be compared directly. To correlate a stall with USB/kernel messages, save the OS log for the same *local* time window, preferably before rebooting:
+
+```bash
+python3 capture_realsense_kernel_log.py \
+  --since 'YYYY-MM-DD HH:MM:SS' --until 'YYYY-MM-DD HH:MM:SS' \
+  --boot 0 --output /path/to/RUNTIME_ROOT/.runtime/kernel_usb.log
+```
+
+After a reboot, use `--boot -1` for the previous boot if the system retains its journal. Also record the output of `lsusb -t` and `rs-enumerate-devices -S` to identify the USB path and camera version. The detector does not read the system journal during frame processing; journal access depends on the machine's permissions and retention settings.
+
 Stop the process with `Ctrl+C` or `SIGTERM`; the node stops workers and closes its HTTP receiver to release the port.

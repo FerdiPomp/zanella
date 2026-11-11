@@ -2,11 +2,13 @@ import numpy as np
 import cv2
 import threading
 import time
+from datetime import datetime
 
 from sklearn.linear_model import LinearRegression, RANSACRegressor
 
 import configuration as CONFIG
 from engine.runtime_utils import print_log, save_jpg_artifact, save_numpy_artifact
+from hardware.realsense_diagnostics import RealSenseFrameDiagnostics, device_details
 
 
 def _estimate_plane(points):
@@ -133,7 +135,8 @@ class RealSenseCamera:
                 self.config.enable_stream(self.rs.stream.color, 1280, 720, self.rs.format.bgr8, 5)
 
         profile = self.pipeline.start(self.config)
-        self.depth_scale = profile.get_device().first_depth_sensor().get_depth_scale()
+        self.device = profile.get_device()
+        self.depth_scale = self.device.first_depth_sensor().get_depth_scale()
         self.pc = self.rs.pointcloud()
         self.plane = None
         self.roi_mask = None
@@ -144,6 +147,11 @@ class RealSenseCamera:
         self.close()
 
     def close(self):
+        diagnostics = getattr(self, "frame_diagnostics", None)
+        if diagnostics is not None:
+            diagnostics.record_event("camera_close")
+            diagnostics.close()
+            self.frame_diagnostics = None
         if getattr(self, "pipeline", None) is not None:
             try:
                 self.pipeline.stop()
@@ -253,8 +261,9 @@ class ObjectDetectionCamera:
             self.detect_queue.append(obj_mask)
             if len(self.detect_queue) > CONFIG.MAX_LEN:
                 self.detect_queue.pop(0)
-                if not self.obj_find:
-                    self.obj_find = self._there_is_obj() & shape_ok
+                # if not self.obj_find:
+                #     self.obj_find = self._there_is_obj() & shape_ok
+                self.obj_find = self._there_is_obj() & shape_ok
                 should_save_debug = True
         else:
             if self.obj_find:
@@ -267,6 +276,13 @@ class ObjectDetectionCamera:
 class ObjCamera(RealSenseCamera, ObjectDetectionCamera):
     def __init__(self, is_enter_node: bool, file_bag: str = None, plane=None):
         super().__init__(CONFIG.DEBUGGING, file_bag)
+        self.frame_diagnostics = None
+        if CONFIG.DEBUGGING:
+            self.frame_diagnostics = RealSenseFrameDiagnostics(
+                "A" if is_enter_node else "B",
+                device_details(self.rs, self.device),
+                playback=file_bag is not None,
+            )
         self.ROI = CONFIG.ROI_A if is_enter_node else CONFIG.ROI_B
         self._init_object_detection()
         time.sleep(3)
@@ -276,34 +292,94 @@ class ObjCamera(RealSenseCamera, ObjectDetectionCamera):
             self.load_plane(plane)
 
     def find_object(self):
+        diagnostics = getattr(self, "frame_diagnostics", None)
+        wait_started_ns = time.monotonic_ns()
         try:
             frames = self._wait_for_frames()
         except RuntimeError as error:
             print_log(f"Frame timeout, restart pipeline: {error}")
+            if diagnostics is not None:
+                diagnostics.record_event(
+                    "wait_error",
+                    phase="initial",
+                    error=str(error),
+                    wait_ms=round((time.monotonic_ns() - wait_started_ns) / 1_000_000, 3),
+                )
             try:
                 self.pipeline.stop()
             except Exception:
                 pass
             time.sleep(1)
-            self.pipeline.start(self.config)
+            try:
+                self.pipeline.start(self.config)
+            except Exception as restart_error:
+                if diagnostics is not None:
+                    diagnostics.record_event("pipeline_restart_error", error=str(restart_error))
+                raise
+            if diagnostics is not None:
+                diagnostics.record_event("pipeline_restarted")
+                diagnostics.reset_frame_history()
             time.sleep(2)
-            frames = self._wait_for_frames()
+            wait_started_ns = time.monotonic_ns()
+            try:
+                frames = self._wait_for_frames()
+            except RuntimeError as retry_error:
+                if diagnostics is not None:
+                    diagnostics.record_event(
+                        "wait_error",
+                        phase="after_restart",
+                        error=str(retry_error),
+                        wait_ms=round((time.monotonic_ns() - wait_started_ns) / 1_000_000, 3),
+                    )
+                raise
 
+        acquired_monotonic_ns = time.monotonic_ns()
+        acquired_host_time = datetime.now().astimezone().isoformat(timespec="milliseconds")
+        wait_ms = (acquired_monotonic_ns - wait_started_ns) / 1_000_000
         depth_frame = frames.get_depth_frame()
+        color_frame = None
+        color_frame_error = None
+        if CONFIG.DEBUGGING:
+            try:
+                color_frame = frames.get_color_frame()
+            except Exception as error:
+                color_frame_error = str(error)
+        depth = np.asanyarray(depth_frame.get_data()) if depth_frame else None
+        color = None
+        color_data_error = None
+        if color_frame:
+            try:
+                color = np.asanyarray(color_frame.get_data())
+            except Exception as error:
+                color_data_error = str(error)
+        frame_index = None
+        if diagnostics is not None:
+            frame_index = diagnostics.record_frame(
+                depth_frame, color_frame, depth, color, wait_ms,
+                acquired_host_time=acquired_host_time,
+                acquired_monotonic_ns=acquired_monotonic_ns,
+                color_frame_error=color_frame_error,
+                color_data_error=color_data_error,
+            )
         if not depth_frame:
             return None
 
-        color_frame = frames.get_color_frame() if CONFIG.DEBUGGING else None
-        depth = np.asanyarray(depth_frame.get_data())
         height_map = self._build_height_map_from_depth_frame(depth_frame)
         object_mask = (height_map > CONFIG.MIN_HEIGHT_THRESHOLD) & (height_map < CONFIG.MAX_HEIGHT_THRESHOLD)
         object_found, should_save_debug = self._update_object_state(object_mask)
 
         if CONFIG.DEBUGGING and should_save_debug:
-            _save_debug_artifact(depth, "_not_right_shape", "debug_shape")
-            if color_frame:
-                color = np.asanyarray(color_frame.get_data())
-                _save_debug_artifact(color, "_shape", "debug_shape_img")
+            depth_path = _save_debug_artifact(depth, "_not_right_shape", "debug_shape")
+            color_path = None
+            if color is not None:
+                color_path = _save_debug_artifact(color, "_shape", "debug_shape_img")
+            if diagnostics is not None:
+                diagnostics.record_event(
+                    "artifacts_saved",
+                    frame_index=frame_index,
+                    depth_path=str(depth_path.resolve()),
+                    color_path=str(color_path.resolve()) if color_path else None,
+                )
 
         return object_found, depth, object_mask
 
