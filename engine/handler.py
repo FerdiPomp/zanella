@@ -46,9 +46,6 @@ def ObjectDetectionHandler(stop_event, event_queue, node_id, event_type: str, wo
     state = CONFIG.NO_OBJECT
     pending_since = None
 
-    video_seq = []
-    record = False
-
     try:
         while not stop_event.is_set():
             if recovery.should_run():
@@ -57,8 +54,6 @@ def ObjectDetectionHandler(stop_event, event_queue, node_id, event_type: str, wo
                 camera = None
                 state = CONFIG.NO_OBJECT
                 pending_since = None
-                record = False
-                video_seq = []
                 if not recovery.wait_for_reopen(stop_event):
                     break
                 continue
@@ -66,13 +61,12 @@ def ObjectDetectionHandler(stop_event, event_queue, node_id, event_type: str, wo
             if camera is None:
                 camera = _build_obj_camera(is_enter_node, file_bag, recovery.load_plane())
 
-            object_present, img, obj_mask = camera.find_object()
+            object_present, _depth, _obj_mask = camera.find_object()
 
             if object_present is not None:
                 now = time.time()
                 if state == CONFIG.NO_OBJECT:
                     if object_present:
-                        record = True
                         state = CONFIG.OBJECT_PRESENT
                         if work_state.get():
                             _send_led_command(led_queue, "object", "on")
@@ -85,16 +79,11 @@ def ObjectDetectionHandler(stop_event, event_queue, node_id, event_type: str, wo
                             pending_since = now
                         elif now - pending_since >= CONFIG.OBJ_MIN_OFF_TIME:
                             state = CONFIG.NO_OBJECT
-                            record = False
                             _send_led_command(led_queue, "object", "off")
                             pending_since = None
                     else:
                         pending_since = None
 
-            if CONFIG.DEBUGGING:
-                if record and img is not None:
-                    video_seq.append(img)
-                video_seq = _save_sequence_if_ready(record, video_seq, "_obj_camera", "recorded")
     finally:
         _send_led_command(led_queue, "object", "off")
         if camera is not None:
